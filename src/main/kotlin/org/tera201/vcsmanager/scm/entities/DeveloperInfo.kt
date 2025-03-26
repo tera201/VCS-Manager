@@ -1,166 +1,120 @@
-package org.tera201.vcsmanager.scm.entities;
+package org.tera201.vcsmanager.scm.entities
 
-import lombok.Data;
-import org.eclipse.jgit.diff.DiffEntry;
-import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.diff.EditList;
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.revwalk.RevCommit;
-import org.tera201.vcsmanager.util.CommitEntity;
-import org.tera201.vcsmanager.util.FileEntity;
+import org.eclipse.jgit.diff.DiffEntry
+import org.eclipse.jgit.diff.DiffFormatter
+import org.eclipse.jgit.diff.Edit
+import org.eclipse.jgit.lib.Repository
+import org.eclipse.jgit.revwalk.RevCommit
+import org.tera201.vcsmanager.util.CommitEntity
+import org.tera201.vcsmanager.util.FileEntity
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 
-@Data
-public class DeveloperInfo {
-    private long id;
-    private final String name;
-    private final String emailAddress;
-    private final Set<RevCommit> commits;
-    private long changes;
-    private long changesSize;
-    public long actualLinesOwner;
-    public long actualLinesSize;
-    private long linesAdded;
-    private long linesDeleted;
-    private long linesModified;
-    private long fileAdded;
-    private long fileDeleted;
-    private long fileModified;
-    private List<String> authorForFiles;
-    public List<String> ownerForFiles;
+data class DeveloperInfo(
+    var id: Long = -1,
+    val name: String,
+    val emailAddress: String,
+    val commits: MutableSet<RevCommit> = HashSet(),
+    var changes: Long = 0,
+    var changesSize: Long = 0,
+    var actualLinesOwner: Long = 0,
+    var actualLinesSize: Long = 0,
+    var linesAdded: Long = 0,
+    var linesDeleted: Long = 0,
+    var linesModified: Long = 0,
+    var fileAdded: Long = 0,
+    var fileDeleted: Long = 0,
+    var fileModified: Long = 0,
+    val authorForFiles: MutableList<String> = ArrayList(),
+    var ownerForFiles: MutableList<String> = ArrayList()
+) {
 
-    public DeveloperInfo(String name, String emailAddress) {
-        this(name, emailAddress, -1);
+    constructor(commitEntity: CommitEntity, commit: RevCommit) : this(
+        commitEntity.authorId,
+        commitEntity.authorName,
+        commitEntity.authorEmail
+    ) {
+        commits.add(commit)
+        commitEntity.fileEntity.apply {
+            this@DeveloperInfo.changes = changes.toLong()
+            this@DeveloperInfo.changesSize = changesSize.toLong()
+            this@DeveloperInfo.linesAdded = linesAdded.toLong()
+            this@DeveloperInfo.linesDeleted = linesDeleted.toLong()
+            this@DeveloperInfo.linesModified = linesModified.toLong()
+            this@DeveloperInfo.fileAdded = fileAdded.toLong()
+            this@DeveloperInfo.fileDeleted = fileDeleted.toLong()
+            this@DeveloperInfo.fileModified = fileModified.toLong()
+        }
     }
 
-    public DeveloperInfo(CommitEntity commitEntity, RevCommit commit) {
-        this.id = commitEntity.getAuthorId();
-        this.name = commitEntity.getAuthorName();
-        this.emailAddress = commitEntity.getAuthorEmail();
-        this.commits = new HashSet<>();
-        this.authorForFiles = new ArrayList<>();
-        this.ownerForFiles = new ArrayList<>();
-        this.commits.add(commit);
-        this.changes = commitEntity.getFileEntity().getChanges();
-        this.changesSize = commitEntity.getFileEntity().getChangesSize();
-        this.linesAdded = commitEntity.getFileEntity().getLinesAdded();
-        this.linesDeleted = commitEntity.getFileEntity().getLinesDeleted();
-        this.linesModified = commitEntity.getFileEntity().getLinesModified();
-        this.fileAdded = commitEntity.getFileEntity().getFileAdded();
-        this.fileDeleted = commitEntity.getFileEntity().getFileDeleted();
-        this.fileModified = commitEntity.getFileEntity().getFileModified();
-    }
-
-    public DeveloperInfo(String name, String emailAddress, long id) {
-        this.id = id;
-        this.name = name;
-        this.emailAddress = emailAddress;
-        this.commits = new HashSet<>();
-        this.authorForFiles = new ArrayList<>();
-        this.ownerForFiles = new ArrayList<>();
-    }
-
-    public void addCommit(RevCommit commit) {
-        commits.add(commit);
-    }
-
-    public void updateByCommit(CommitEntity commitEntity, RevCommit commit) {
-            if (!this.commits.contains(commit)) {
-                this.commits.add(commit);
-                this.changes += commitEntity.getFileEntity().getChanges();
-                this.changesSize += commitEntity.getFileEntity().getChangesSize();
-                this.linesAdded += commitEntity.getFileEntity().getLinesAdded();
-                this.linesDeleted += commitEntity.getFileEntity().getLinesDeleted();
-                this.linesModified += commitEntity.getFileEntity().getLinesModified();
-                this.fileAdded += commitEntity.getFileEntity().getFileAdded();
-                this.fileDeleted += commitEntity.getFileEntity().getFileDeleted();
-                this.fileModified += commitEntity.getFileEntity().getFileModified();
+    fun updateByCommit(commitEntity: CommitEntity, commit: RevCommit) {
+        if (!commits.contains(commit)) {
+            commits.add(commit)
+            commitEntity.fileEntity.apply {
+                this@DeveloperInfo.changes += changes.toLong()
+                this@DeveloperInfo.changesSize += changesSize.toLong()
+                this@DeveloperInfo.linesAdded += linesAdded.toLong()
+                this@DeveloperInfo.linesDeleted += linesDeleted.toLong()
+                this@DeveloperInfo.linesModified += linesModified.toLong()
+                this@DeveloperInfo.fileAdded += fileAdded.toLong()
+                this@DeveloperInfo.fileDeleted += fileDeleted.toLong()
+                this@DeveloperInfo.fileModified += fileModified.toLong()
             }
-    }
-
-    public void addAuthoredFile(String filePath) {
-        authorForFiles.add(filePath);
-    }
-
-    public void addOwnedFile(String filePath) {
-        ownerForFiles.add(filePath);
-    }
-
-    public void plusLinesAdded(long linesAdded) { this.linesAdded += linesAdded; }
-
-    public void plusLinesDeleted(long linesDeleted) { this.linesDeleted += linesDeleted; }
-
-    public void plusLinesModified(long linesModified) { this.linesModified += linesModified; }
-
-    public void plusFilesAdded(long filesAdded) { this.fileAdded += filesAdded; }
-
-    public void plusFilesDeleted(long filesDeleted) { this.fileDeleted += filesDeleted; }
-
-    public void plusFilesModified(long filesModified) { this.fileModified += filesModified; }
-
-    public void plusChanges(long changes) { this.changes += changes; }
-
-    public void plusChangesSize(long changesSize) { this.changesSize += changesSize; }
-
-    public void processFileEntity(FileEntity fileEntity) {
-        this.plusFilesAdded(fileEntity.getLinesAdded());
-        this.plusFilesDeleted(fileEntity.getLinesDeleted());
-        this.plusFilesModified(fileEntity.getLinesModified());
-        this.plusLinesAdded(fileEntity.getLinesAdded());
-        this.plusLinesDeleted(fileEntity.getLinesDeleted());
-        this.plusLinesModified(fileEntity.getLinesModified());
-        this.plusChanges(fileEntity.getChanges());
-        this.plusChangesSize(fileEntity.getChangesSize());
-    }
-
-    public void processDiff(DiffEntry diff, Repository repository) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        if (diff.getChangeType() == DiffEntry.ChangeType.ADD) {
-            this.addAuthoredFile(diff.getNewPath());
         }
-        switch (diff.getChangeType()) {
-            case ADD ->  fileAdded++;
-            case DELETE -> fileDeleted++;
-            case MODIFY -> fileModified++;
-        }
-        try (DiffFormatter diffFormatter = new DiffFormatter(out)) {
-            diffFormatter.setRepository(repository);
-            diffFormatter.setDetectRenames(true);
-            diffFormatter.format(diff);
+    }
 
-            EditList editList = diffFormatter.toFileHeader(diff).toEditList();
-            for (var edit : editList) {
-                switch (edit.getType()) {
-                    case INSERT -> {
-                        linesAdded += edit.getLengthB();
-                        changes += edit.getLengthB();
+    fun processFileEntity(fileEntity: FileEntity) {
+        this.fileAdded += fileEntity.linesAdded.toLong()
+        this.fileDeleted += fileEntity.linesDeleted.toLong()
+        this.fileModified += fileEntity.linesModified.toLong()
+        this.linesAdded += fileEntity.linesAdded.toLong()
+        this.linesDeleted += fileEntity.linesDeleted.toLong()
+        this.linesModified += fileEntity.linesModified.toLong()
+        this.changes += fileEntity.changes.toLong()
+        this.changesSize += fileEntity.changesSize.toLong()
+    }
+
+    @Throws(IOException::class)
+    fun processDiff(diff: DiffEntry, repository: Repository?) {
+        val out = ByteArrayOutputStream()
+
+
+        when (diff.changeType) {
+            DiffEntry.ChangeType.ADD -> {this.authorForFiles.add(diff.newPath); fileAdded++}
+            DiffEntry.ChangeType.DELETE -> fileDeleted++
+            DiffEntry.ChangeType.MODIFY -> fileModified++
+            DiffEntry.ChangeType.RENAME -> TODO()
+            DiffEntry.ChangeType.COPY -> TODO()
+        }
+        DiffFormatter(out).use { diffFormatter ->
+            diffFormatter.setRepository(repository)
+            diffFormatter.isDetectRenames = true
+            diffFormatter.format(diff)
+
+            val editList = diffFormatter.toFileHeader(diff).toEditList()
+            for (edit in editList) {
+                when (edit.type) {
+                    Edit.Type.INSERT -> {
+                        linesAdded += edit.lengthB.toLong()
+                        changes += edit.lengthB.toLong()
                     }
-                    case DELETE -> {
-                        linesDeleted += edit.getLengthA();
-                        changes += edit.getLengthA();
+
+                    Edit.Type.DELETE -> {
+                        linesDeleted += edit.lengthA.toLong()
+                        changes += edit.lengthA.toLong()
                     }
-                    case REPLACE -> {
+
+                    Edit.Type.REPLACE -> {
                         //TODO getLengthA (removed)  getLengthB (added) - maybe max(A,B) or just B
-                        linesModified += edit.getLengthA() + edit.getLengthB();
-                        changes += edit.getLengthA() + edit.getLengthB();
+                        linesModified += (edit.lengthA + edit.lengthB).toLong()
+                        changes += (edit.lengthA + edit.lengthB).toLong()
                     }
+
+                    Edit.Type.EMPTY -> TODO()
                 }
             }
         }
-        changesSize += out.size();
-    }
-
-    public void increaseActualLinesOwner(long linesOwner) {
-        actualLinesOwner += linesOwner;
-    }
-
-    public void increaseActualLinesSize(long linesSize) {
-        actualLinesSize += linesSize;
+        changesSize += out.size().toLong()
     }
 }

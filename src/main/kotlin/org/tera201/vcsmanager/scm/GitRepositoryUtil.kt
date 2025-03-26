@@ -90,12 +90,12 @@ object GitRepositoryUtil {
             linesSizes.merge(authorEmail, lineSize, Long::plus)
             linesOwners.merge(authorEmail, 1, Int::plus)
         }
-        linesOwners.forEach { (key: String?, value: Int?) -> developers[key]!!.increaseActualLinesOwner(value.toLong()) }
-        linesSizes.forEach { (key: String?, value: Long?) -> developers[key]!!.increaseActualLinesSize(value) }
+        linesOwners.forEach { (key: String?, value: Int?) -> developers[key]!!.actualLinesOwner += value.toLong() }
+        linesSizes.forEach { (key: String?, value: Long?) -> developers[key]!!.actualLinesSize += value }
 
         linesOwners.entries.maxByOrNull { it.value }?.also {
             developers[it.key]!!
-                .addOwnedFile(blameResult.resultPath)
+                .ownerForFiles.add(blameResult.resultPath)
         }
 
     }

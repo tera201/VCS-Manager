@@ -243,7 +243,7 @@ class DataBaseUtil(val url:String) {
                 val date = rs.getInt("date")
                 val size = rs.getLong("projectSize")
                 val stability = rs.getDouble("stability")
-                commitSizeMap.put(hash, CommitSize(hash, authorName, authorEmail, size, date, stability))
+                commitSizeMap[hash] = CommitSize(hash, size, authorName, authorEmail, mutableMapOf(),  stability, date)
             }
         }
         return commitSizeMap
@@ -271,7 +271,7 @@ class DataBaseUtil(val url:String) {
                 val date = rs.getInt("date")
                 val size = rs.getLong("projectSize")
                 val stability = rs.getDouble("stability")
-                commitSizeMap.put(hash, CommitSize(hash, authorName, authorEmail, size, date, stability))
+                commitSizeMap[hash] = CommitSize(hash, size, authorName, authorEmail, mutableMapOf(),  stability, date)
             }
         }
         return commitSizeMap

@@ -48,7 +48,7 @@ open class GitRepository : SCM {
 
     private var collectConfig: CollectConfiguration? = null
 
-    private var repoName: String? = null
+    private var repoName: String
 
     /* User-specified. */
     private var path: String? = null
@@ -70,6 +70,7 @@ open class GitRepository : SCM {
         log.debug("Creating a GitRepository from path $path")
         setPath(path)
         setFirstParentOnly(firstParentOnly)
+        repoName = ""
         maxNumberFilesInACommit = checkMaxNumberOfFiles()
         maxSizeOfDiff = checkMaxSizeOfDiff()
 
@@ -80,7 +81,7 @@ open class GitRepository : SCM {
         log.debug("Creating a GitRepository from path $path")
         this.dataBaseUtil = dataBaseUtil
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-        setRepoName(splitPath[splitPath.size - 1])
+        repoName = splitPath[splitPath.size - 1]
         val projectId = dataBaseUtil?.getProjectId(repoName!!, path)
         this.projectId = Objects.requireNonNullElseGet(
             projectId
@@ -686,7 +687,7 @@ open class GitRepository : SCM {
                             val commit = blameResult.getSourceCommit(i)
                             val blameAuthorInfo = BlameAuthorInfo(
                                 author,
-                                setOf(commit),
+                                mutableSetOf(commit),
                                 1,
                                 blameResult.resultContents.getString(i).toByteArray().size.toLong()
                             )
@@ -805,7 +806,7 @@ open class GitRepository : SCM {
                                     org.tera201.vcsmanager.scm.entities.FileEntity(
                                         projectId!!,
                                         it,
-                                        filePathMap[it],
+                                        filePathMap[it]!!,
                                         commit.name,
                                         commit.commitTime
                                     )
@@ -941,8 +942,10 @@ open class GitRepository : SCM {
     ) {
         try {
             val email = commit.authorIdent.emailAddress
-            val dev = developers.computeIfAbsent(email) { k: String? -> DeveloperInfo(commit.authorIdent.name, email) }
-            dev.addCommit(commit)
+            val dev = developers.computeIfAbsent(email) { k: String? ->
+                DeveloperInfo(name = commit.authorIdent.name, emailAddress =  email)
+            }
+            dev.commits.add(commit)
             GitRepositoryUtil.analyzeCommit(commit, git, dev)
         } catch (ignored: IOException) {
         }
@@ -1017,7 +1020,7 @@ open class GitRepository : SCM {
         return `val`.toInt()
     }
 
-    fun setRepoName(repoName: String?) {
+    fun setRepoName(repoName: String) {
         this.repoName = repoName
     }
 

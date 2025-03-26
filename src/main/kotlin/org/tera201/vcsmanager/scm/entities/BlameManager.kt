@@ -1,41 +1,26 @@
-package org.tera201.vcsmanager.scm.entities;
+package org.tera201.vcsmanager.scm.entities
 
-import lombok.Getter;
+data class BlameManager(
+    var fileMap: Map<String, BlameFileInfo>,
+    var projectName: String
+) {
+    var packageMap: Map<String, BlamePackageInfo> = aggregateByPackage()
+    var rootPackageInfo: BlamePackageInfo? = packageMap["/$projectName"]
 
-import java.util.HashMap;
-import java.util.Map;
+    private fun aggregateByPackage(): Map<String, BlamePackageInfo> {
+        val packageData = mutableMapOf<String, BlamePackageInfo>()
 
-@Getter
-public class BlameManager {
-    Map<String, BlameFileInfo> fileMap;
-    Map<String, BlamePackageInfo> packageMap;
-    BlamePackageInfo rootPackageInfo;
-    String projectName;
+        fileMap.forEach { (filePath, fileInfo) ->
+            var packagePath = "/$projectName/$filePath".substringBeforeLast('/', "")
 
-    public BlameManager(Map<String, BlameFileInfo> fileMap, String projectName) {
-        this.fileMap = fileMap;
-        this.projectName = projectName;
-        this.packageMap = aggregateByPackage();
-    }
-
-    private Map<String, BlamePackageInfo> aggregateByPackage() {
-        Map<String, BlamePackageInfo> packageData = new HashMap<>();
-
-        for (Map.Entry<String, BlameFileInfo> entry : fileMap.entrySet()) {
-            String filePath = "/" + projectName + "/" + entry.getKey();
-            BlameFileInfo fileInfo = entry.getValue();
-            String packagePath = (filePath.lastIndexOf('/') > 0 ) ? filePath.substring(0, filePath.lastIndexOf('/')) : "";
-
-            while (packagePath.lastIndexOf('/') != -1) {
-                String packageName = (packagePath.lastIndexOf('/') != -1 ) ? packagePath.substring(packagePath.lastIndexOf('/') + 1) : packagePath;
-                packageData.computeIfAbsent(packagePath, k -> new BlamePackageInfo(packageName)).add(fileInfo, filePath);
-                packagePath = switch (packagePath.lastIndexOf('/')) {
-                    case -1, 0 -> "";
-                    default -> packagePath.substring(0, packagePath.lastIndexOf('/'));
-                };
+            while (packagePath.isNotEmpty()) {
+                val packageName = packagePath.substringAfterLast('/')
+                packageData.computeIfAbsent(packagePath) { BlamePackageInfo(packageName) }
+                    .add(fileInfo, packagePath)
+                packagePath = packagePath.substringBeforeLast('/', "")
             }
         }
-        rootPackageInfo = packageData.get("/" + projectName);
-        return packageData;
+
+        return packageData
     }
 }

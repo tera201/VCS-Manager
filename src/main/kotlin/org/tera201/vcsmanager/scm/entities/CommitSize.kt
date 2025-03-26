@@ -1,60 +1,24 @@
-package org.tera201.vcsmanager.scm.entities;
+package org.tera201.vcsmanager.scm.entities
 
-import lombok.Getter;
+data class CommitSize (
+    val name: String,
+    var projectSize: Long = 0,
+    var authorName: String? = null,
+    var authorEmail: String? = null,
+    val fileSize: MutableMap<String, Long> = mutableMapOf(),
+    var stability:Double = 0.0,
+    val date: Int,
+) {
 
-import java.util.HashMap;
-import java.util.Map;
-
-@Getter
-public class CommitSize {
-    private String name;
-    private long projectSize;
-    private String authorName;
-    private String authorEmail;
-    private Map<String, Long> fileSize;
-    private double stability;
-    private int date;
-
-    public CommitSize(String name, int date, double stability) {
-        this.name = name;
-        this.projectSize = 0;
-        this.fileSize = new HashMap<>();
-        this.stability = stability;
-        this.date = date;
+    fun setAuthor(authorName: String?, authorEmail: String?) {
+        this.authorName = authorName
+        this.authorEmail = authorEmail
     }
 
-    public CommitSize(String name, String authorName, String authorEmail, long projectSize, int date, double stability) {
-        this.name = name;
-        this.authorName = authorName;
-        this.authorEmail = authorEmail;
-        this.projectSize = projectSize;
-        this.fileSize = new HashMap<>();
-        this.date = date;
-        this.stability = stability;
+    fun addFile(fileName: String, fileSize: Long) {
+        this.fileSize[fileName] = fileSize
+        this.projectSize += fileSize
     }
 
-    public CommitSize(String name, long projectSize, Map<String, Long> fileSize, int date) {
-        this.name = name;
-        this.projectSize = projectSize;
-        this.fileSize = fileSize;
-        this.date = date;
-    }
-
-    public void setAuthor(String authorName, String authorEmail) {
-        this.authorName = authorName;
-        this.authorEmail = authorEmail;
-    }
-
-    public void addFile(String fileName, long fileSize) {
-        this.fileSize.put(fileName, fileSize);
-        this.projectSize += fileSize;
-    }
-
-    public void setStability(double stability) {
-        this.stability = stability;
-    }
-
-    public void  addFileSize(long fileSize) {
-        this.projectSize += fileSize;
-    }
+    fun addFileSize(fileSize: Long) = projectSize.plus(fileSize)
 }
