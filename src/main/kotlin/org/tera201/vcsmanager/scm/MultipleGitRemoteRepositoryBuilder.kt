@@ -1,27 +1,11 @@
-package org.tera201.vcsmanager.scm;
+package org.tera201.vcsmanager.scm
 
-import java.util.List;
+import org.tera201.vcsmanager.scm.GitRemoteRepository.Companion.allProjectsIn
 
-public class MultipleGitRemoteRepositoryBuilder extends GitRemoteRepositoryBuilder {
+class MultipleGitRemoteRepositoryBuilder(private val gitUrls: List<String>) : GitRemoteRepositoryBuilder() {
+    fun inTempDir(tempDir: String?): MultipleGitRemoteRepositoryBuilder = apply { super.tempDir = tempDir }
 
-	private List<String> gitUrls;
+    fun asBareRepos(): MultipleGitRemoteRepositoryBuilder = apply { super.bare = true }
 
-	public MultipleGitRemoteRepositoryBuilder(List<String> gitUrls) {
-		this.gitUrls = gitUrls;
-	}
-	
-	public MultipleGitRemoteRepositoryBuilder inTempDir(String tempDir) {
-		super.tempDir = tempDir;
-		return this;
-	}
-
-	public MultipleGitRemoteRepositoryBuilder asBareRepos() {
-		super.bare = true;
-		return this;
-	}
-
-	public SCMRepository[] buildAsSCMRepositories() {
-		return GitRemoteRepository.allProjectsIn(this.gitUrls, this.tempDir, this.bare);
-	}
-
+    fun buildAsSCMRepositories(): Array<SCMRepository> = allProjectsIn(this.gitUrls, this.tempDir, this.bare)
 }

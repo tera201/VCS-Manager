@@ -90,8 +90,8 @@ object GitRepositoryUtil {
             linesSizes.merge(authorEmail, lineSize, Long::plus)
             linesOwners.merge(authorEmail, 1, Int::plus)
         }
-        linesOwners.forEach { (key: String?, value: Int?) -> developers[key]!!.actualLinesOwner += value.toLong() }
-        linesSizes.forEach { (key: String?, value: Long?) -> developers[key]!!.actualLinesSize += value }
+        linesOwners.forEach { (key: String, value: Int) -> developers[key]!!.actualLinesOwner += value.toLong() }
+        linesSizes.forEach { (key: String, value: Long) -> developers[key]!!.actualLinesSize += value }
 
         linesOwners.entries.maxByOrNull { it.value }?.also {
             developers[it.key]!!

@@ -41,7 +41,7 @@ class BuildModel {
             .buildAsSCMRepository()
     }
 
-    fun getRepository(gitUrl: String?, path: String?, dataBaseDirPath: String): SCMRepository {
+    fun getRepository(gitUrl: String, path: String?, dataBaseDirPath: String): SCMRepository {
         val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
         dataBaseUtil.create()
         return GitRemoteRepository
@@ -65,7 +65,7 @@ class BuildModel {
     }
 
     @Throws(GitAPIException::class)
-    fun createRepo(gitUrl: String?): GitRemoteRepository {
+    fun createRepo(gitUrl: String): GitRemoteRepository {
         return GitRemoteRepository
             .hostedOn(gitUrl)
             .build()
@@ -115,6 +115,7 @@ class BuildModel {
             val gitUrl = "https://github.com/arnohaase/a-foundation.git"
 
             val buildModel = BuildModel()
+            log.info("Builded")
 
             val repo = buildModel.getRepository(gitUrl, "$tempDir/a-foundation", "$tempDir/db")
 

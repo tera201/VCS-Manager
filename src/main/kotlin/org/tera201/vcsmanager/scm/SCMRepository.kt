@@ -1,44 +1,32 @@
-package org.tera201.vcsmanager.scm;
+package org.tera201.vcsmanager.scm
 
-import lombok.Getter;
+data class SCMRepository(
+    val scm: SCM, // e.g. GitHub URL
+    private val origin: String?,
+    private val repoName: String,
+    val path: String, // Local file system path
+    val headCommit: String, // Most recent commit
+    val firstCommit: String // First commit
+) {
 
-/* TODO Naming is confusing. */
-public class SCMRepository {
+    /**
+     * Returns the origin URL or the local path if origin is not provided.
+     */
+    fun getOrigin(): String = origin ?: path
 
-	@Getter
-	private String repoName;
-	@Getter
-    private String path; /* Path in local FS. */
-	@Getter
-    private String headCommit; /* Most recent commit. */
-	@Getter
-    private String firstCommit; /* First commit. */
-	@Getter
-    private SCM scm;
-	private String origin; /* e.g. GitHub URL */
+    /**
+     * Returns the last directory in the path.
+     */
+    val lastDir: String
+        get() {
+            val dirs = path.replace("\\", "/").split("/".toRegex()).filter { it.isNotEmpty() }
+            return dirs.lastOrNull() ?: ""
+        }
 
-	public SCMRepository(SCM scm, String origin, String repoName, String path, String headCommit, String firstCommit) {
-		this.scm = scm;
-		this.origin = origin;
-		this.repoName = repoName;
-		this.path = path;
-		this.headCommit = headCommit;
-		this.firstCommit = firstCommit;
-	}
-
-    public String getOrigin() {
-		return origin == null ? path : origin;
-	}
-
-	public String getLastDir() {
-		String[] dirs = path.replace("\\", "/").split("/");
-		return dirs[dirs.length-1];
-	}
-
-	@Override
-	public String toString() {
-		return "SCMRepository [path=" + path + ", headCommit=" + headCommit + ", lastCommit=" + firstCommit + ", scm="
-				+ scm + ", origin=" + origin + "]";
-	}
-
+    /**
+     * Provides a string representation of the SCM repository.
+     */
+    override fun toString(): String {
+        return "SCMRepository(path='$path', headCommit='$headCommit', firstCommit='$firstCommit', scm=$scm, origin=$origin)"
+    }
 }

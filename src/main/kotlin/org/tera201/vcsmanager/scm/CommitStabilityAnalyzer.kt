@@ -1,121 +1,126 @@
-package org.tera201.vcsmanager.scm;
+package org.tera201.vcsmanager.scm
 
-import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.diff.DiffEntry;
-import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.diff.Edit;
-import org.eclipse.jgit.diff.EditList;
-import org.eclipse.jgit.patch.FileHeader;
-import org.eclipse.jgit.revwalk.RevCommit;
-import org.eclipse.jgit.util.io.DisabledOutputStream;
+import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.diff.DiffFormatter
+import org.eclipse.jgit.diff.Edit
+import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.util.io.DisabledOutputStream
+import java.util.*
+import kotlin.math.max
+import kotlin.math.min
 
-import java.util.*;
+object CommitStabilityAnalyzer {
+    @Throws(Exception::class)
+    fun analyzeCommit(git: Git, commitList: List<RevCommit>, commit: RevCommit, index: Int): Double {
+        var commitStability = 1.0
+        val commitDate = commit.committerIdent.getWhen()
+        val calendar = Calendar.getInstance()
+        calendar.time = commitDate
+        calendar.add(Calendar.MONTH, 1)
+        val oneMonthLater = calendar.time
 
-public class CommitStabilityAnalyzer {
-
-    public static Double analyzeCommit(Git git, List<RevCommit> commitList, RevCommit commit, int index) throws Exception {
-        double commitStability = 1D;
-        Date commitDate = commit.getCommitterIdent().getWhen();
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(commitDate);
-        calendar.add(Calendar.MONTH, 1);
-        Date oneMonthLater = calendar.getTime();
-
-        RevCommit nextMonthCommit = findCommitInNextMonth(commitList, index, commitDate,  oneMonthLater);
+        val nextMonthCommit = findCommitInNextMonth(commitList, index, commitDate, oneMonthLater)
 
         if (nextMonthCommit != null) {
-            commitStability = calculateCommitStability(git, commit, nextMonthCommit);
+            commitStability = calculateCommitStability(git, commit, nextMonthCommit)
         }
-        return commitStability;
+        return commitStability
     }
 
-    private static RevCommit findCommitInNextMonth(List<RevCommit> commitList, int index, Date currentCommitDate, Date oneMonthLater) {
-        RevCommit nextMonthCommits = null;
-        for (int i = 0; i < index; i++) {
-            RevCommit commit = commitList.get(i);
-            Date commitDate = commit.getCommitterIdent().getWhen();
+    private fun findCommitInNextMonth(
+        commitList: List<RevCommit>,
+        index: Int,
+        currentCommitDate: Date,
+        oneMonthLater: Date
+    ): RevCommit? {
+        var nextMonthCommits: RevCommit? = null
+        for (i in 0..<index) {
+            val commit = commitList[i]
+            val commitDate = commit.committerIdent.getWhen()
             if (commitDate.after(currentCommitDate) && commitDate.before(oneMonthLater)) {
-                nextMonthCommits = commit;
+                nextMonthCommits = commit
             }
         }
-        return nextMonthCommits;
+        return nextMonthCommits
     }
 
-    private static double calculateCommitStability(Git git, RevCommit targetCommit, RevCommit lastMonthCommit) throws Exception {
-        RevCommit parent = targetCommit.getParentCount() > 0 ? targetCommit.getParent(0) : null;
-        List<Edit> editsAB = new ArrayList<>();
-        List<Edit> editsBC = new ArrayList<>();
-        long abSize;
+    @Throws(Exception::class)
+    private fun calculateCommitStability(git: Git, targetCommit: RevCommit, lastMonthCommit: RevCommit): Double {
+        val parent = if (targetCommit.parentCount > 0) targetCommit.getParent(0) else null
+        val editsAB: MutableList<Edit> = ArrayList()
+        val editsBC: MutableList<Edit> = ArrayList()
+        val abSize: Long
 
-        try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-            diffFormatter.setRepository(git.getRepository());
-
-            List<DiffEntry> diffs = diffFormatter.scan(parent, targetCommit);
-            for (DiffEntry diff : diffs) {
-                FileHeader fileHeader = diffFormatter.toFileHeader(diff);
-                EditList edits = fileHeader.toEditList();
-                editsAB.addAll(edits);
+        DiffFormatter(DisabledOutputStream.INSTANCE).use { diffFormatter ->
+            diffFormatter.setRepository(git.repository)
+            var diffs = diffFormatter.scan(parent, targetCommit)
+            for (diff in diffs) {
+                val fileHeader = diffFormatter.toFileHeader(diff)
+                val edits = fileHeader.toEditList()
+                editsAB.addAll(edits)
             }
 
-            abSize = editsAB.stream().mapToLong(Edit::getLengthB).sum();
-            if (abSize == 0) return 0;
+            abSize = editsAB.stream().mapToLong { obj: Edit -> obj.lengthB.toLong().toLong() }.sum()
+            if (abSize == 0L) return 0.0
 
-            diffs = diffFormatter.scan(targetCommit, lastMonthCommit);
-            for (DiffEntry diff : diffs) {
-                FileHeader fileHeader = diffFormatter.toFileHeader(diff);
-                EditList edits = fileHeader.toEditList();
-                editsBC.addAll(edits);
+            diffs = diffFormatter.scan(targetCommit, lastMonthCommit)
+            for (diff in diffs) {
+                val fileHeader = diffFormatter.toFileHeader(diff)
+                val edits = fileHeader.toEditList()
+                editsBC.addAll(edits)
             }
         }
-        double intersectionSize = getIntersectingEdits(editsAB, editsBC).stream().mapToDouble(it -> it[1] - it[0]).sum();
+        val intersectionSize =
+            getIntersectingEdits(editsAB, editsBC).stream().mapToDouble { it: IntArray -> (it[1] - it[0]).toDouble() }
+                .sum()
 
-        return 1 - intersectionSize / abSize;
+        return 1 - intersectionSize / abSize
     }
-    
 
-    private static int[] getIntersectionStartAndEnd(Edit editA, int[] editB) {
-        int start = Math.max(editA.getBeginB(), editB[0]);
-        int end = Math.min(editA.getEndB(), editB[1]);
 
-        if (start < end) {
-            return new int[]{start, end};
+    private fun getIntersectionStartAndEnd(editA: Edit, editB: IntArray): IntArray {
+        val start = max(editA.beginB.toDouble(), editB[0].toDouble()).toInt()
+        val end = min(editA.endB.toDouble(), editB[1].toDouble()).toInt()
+
+        return if (start < end) {
+            intArrayOf(start, end)
         } else {
-            return new int[0];
+            IntArray(0)
         }
     }
 
-    public static List<int[]> mergeIntersectingRanges(List<Edit> edits) {
-        if (edits.isEmpty()) return Collections.emptyList();
-        edits.sort(Comparator.comparingInt(Edit::getBeginA));
-        List<int[]> mergedRanges = new ArrayList<>();
-        int[] currentRange = new int[]{edits.get(0).getBeginA(), edits.get(0).getEndA()};
+    fun mergeIntersectingRanges(edits: List<Edit>): List<IntArray> {
+        if (edits.isEmpty()) return emptyList()
+        val sortedEdits = edits.sortedBy { it.beginA }
+        val mergedRanges: MutableList<IntArray> = ArrayList()
+        var currentRange = intArrayOf(edits[0].beginA, edits[0].endA)
 
-        for (Edit edit : edits) {
-            int startA = edit.getBeginA();
-            int endA = edit.getEndA();
+        for (edit in sortedEdits) {
+            val startA = edit.beginA
+            val endA = edit.endA
 
             if (startA <= currentRange[1]) {
-                currentRange[1] = Math.max(currentRange[1], endA);
+                currentRange[1] = max(currentRange[1].toDouble(), endA.toDouble()).toInt()
             } else {
-                mergedRanges.add(currentRange);
-                currentRange = new int[]{startA, endA};
+                mergedRanges.add(currentRange)
+                currentRange = intArrayOf(startA, endA)
             }
         }
-        mergedRanges.add(currentRange);
-        return mergedRanges;
+        mergedRanges.add(currentRange)
+        return mergedRanges
     }
 
-    private static List<int[]> getIntersectingEdits(List<Edit> editsA, List<Edit> editsB) {
-        List<int[]> intersectingEdits = new ArrayList<>();
-        List<int[]> mergedEditsB = mergeIntersectingRanges(editsB);
-        for (Edit editA : editsA) {
-            for (int[] editB : mergedEditsB) {
-                int[] intersection = getIntersectionStartAndEnd(editA, editB);
-                if (intersection.length != 0) {
-                    intersectingEdits.add(intersection);
+    private fun getIntersectingEdits(editsA: List<Edit>, editsB: List<Edit>): List<IntArray> {
+        val intersectingEdits: MutableList<IntArray> = ArrayList()
+        val mergedEditsB = mergeIntersectingRanges(editsB)
+        for (editA in editsA) {
+            for (editB in mergedEditsB) {
+                val intersection = getIntersectionStartAndEnd(editA, editB)
+                if (intersection.size != 0) {
+                    intersectingEdits.add(intersection)
                 }
             }
         }
-        return intersectingEdits;
+        return intersectingEdits
     }
 }

@@ -51,24 +51,33 @@ open class GitRepository : SCM {
     private var repoName: String
 
     /* User-specified. */
-    private var path: String? = null
+    private var path: String
     private var firstParentOnly = false
     var sizeCache: Map<ObjectId, Long> = ConcurrentHashMap()
-    @JvmField
-	protected var dataBaseUtil: DataBaseUtil? = null
-    @JvmField
-	protected var projectId: Int? = null
+	protected open var dataBaseUtil: DataBaseUtil? = null
+	protected open var projectId: Int? = null
+    override val changeSets: List<ChangeSet> get() {
+        try {
+            openRepository().use { git ->
+                val allCs = if (!firstParentOnly) getAllCommits(git)
+                else firstParentsOnly(git)
+                git.close()
+                return allCs
+            }
+        } catch (e: Exception) {
+            throw RuntimeException("error in getChangeSets for $path", e)
+        }
+    }
 
     /**
      * Intended for sub-classes.
      * Make sure you initialize appropriately with the Setters.
      */
-    protected constructor() : this(null)
+    protected constructor() : this("")
 
-    @JvmOverloads
-    constructor(path: String?, firstParentOnly: Boolean = false) {
+    constructor(path: String, firstParentOnly: Boolean = false) {
         log.debug("Creating a GitRepository from path $path")
-        setPath(path)
+        this.path = path
         setFirstParentOnly(firstParentOnly)
         repoName = ""
         maxNumberFilesInACommit = checkMaxNumberOfFiles()
@@ -86,7 +95,7 @@ open class GitRepository : SCM {
         this.projectId = Objects.requireNonNullElseGet(
             projectId
         ) { dataBaseUtil?.insertProject(repoName!!, path) }
-        setPath(path)
+        this.path = path
         setFirstParentOnly(firstParentOnly)
 
         maxNumberFilesInACommit = checkMaxNumberOfFiles()
@@ -142,12 +151,10 @@ open class GitRepository : SCM {
             }
         }
 
-    @Throws(IOException::class, GitAPIException::class)
     fun openRepository(): Git = Git.open(File(path)).also { git ->
         this.mainBranchName = this.mainBranchName ?: discoverMainBranchName(git)
     }
 
-    @Throws(IOException::class)
     private fun discoverMainBranchName(git: Git): String = git.repository.branch
 
     override val head: ChangeSet get() {
@@ -164,19 +171,6 @@ open class GitRepository : SCM {
             throw RuntimeException("error in getHead() for $path", e)
         } finally {
             revWalk!!.close()
-        }
-    }
-
-    override val changeSets: List<ChangeSet> get() {
-        try {
-            openRepository().use { git ->
-                val allCs = if (!firstParentOnly) getAllCommits(git)
-                else firstParentsOnly(git)
-                git.close()
-                return allCs
-            }
-        } catch (e: Exception) {
-            throw RuntimeException("error in getChangeSets for $path", e)
         }
     }
 
@@ -242,7 +236,6 @@ open class GitRepository : SCM {
         }
     }
 
-    @Throws(GitAPIException::class, IOException::class)
     private fun getAllCommits(git: Git): List<ChangeSet> {
         val allCs: MutableList<ChangeSet> = ArrayList()
 
@@ -352,7 +345,6 @@ open class GitRepository : SCM {
         }
     }
 
-    @Throws(GitAPIException::class)
     private fun getBranches(git: Git, hash: String): Set<String?> {
         if (!collectConfig!!.isCollectingBranches) return HashSet()
 
@@ -388,7 +380,6 @@ open class GitRepository : SCM {
         }
     }
 
-    @Throws(CheckoutException::class)
     override fun checkoutTo(branch: String) {
         try {
             openRepository().use { git ->
@@ -430,7 +421,6 @@ open class GitRepository : SCM {
             }
     }
 
-    @Throws(IOException::class)
     private fun diffToModification(repo: Repository, diff: DiffEntry): Modification {
         val change = enumValueOf<ModificationType>(diff.changeType.toString())
 
@@ -452,7 +442,6 @@ open class GitRepository : SCM {
         return Modification(oldPath, newPath, change, diffText, sc)
     }
 
-    @Throws(IOException::class)
     private fun diffsForTheCommit(repo: Repository, commit: RevCommit): List<DiffEntry>? {
         val currentCommit: AnyObjectId = repo.resolve(commit.name)
         val parentCommit: AnyObjectId? = if (commit.parentCount > 0) repo.resolve(commit.getParent(0).name) else null
@@ -531,7 +520,6 @@ open class GitRepository : SCM {
         }
     }
 
-    @Throws(IOException::class)
     private fun getSourceCode(repo: Repository, diff: DiffEntry): String {
         if (!collectConfig!!.isCollectingSourceCode) return ""
 
@@ -544,7 +532,6 @@ open class GitRepository : SCM {
         }
     }
 
-    @Throws(IOException::class)
     private fun getDiffText(repo: Repository, diff: DiffEntry): String {
         if (!collectConfig!!.isCollectingDiffs) return ""
 
@@ -577,7 +564,6 @@ open class GitRepository : SCM {
     }
 
     @Synchronized
-    @Throws(GitAPIException::class)
     private fun deleteMMBranch(git: Git) {
         val refs = git.branchList().call()
         for (r in refs) {
@@ -613,7 +599,7 @@ open class GitRepository : SCM {
     private val allFilesInPath: List<File>
         get() = RDFileUtils.getAllFilesInPath(path)
 
-    override val totalCommits = changeSets.size.toLong()
+    override val totalCommits: Long get() =  changeSets.size.toLong()
 
     override fun repositoryAllSize(): Map<String, CommitSize> {
         return repositorySize(true, null, null)
@@ -747,8 +733,7 @@ open class GitRepository : SCM {
         }
     }
 
-    @get:Throws(IOException::class, GitAPIException::class)
-    override val developerInfo = getDeveloperInfo(null)
+    override val developerInfo get() = getDeveloperInfo(null)
 
     override fun dbPrepared() {
         developersMap.clear()
@@ -831,7 +816,6 @@ open class GitRepository : SCM {
         }
     }
 
-    @Throws(IOException::class, GitAPIException::class)
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> {
         var nodePath = nodePath
         openRepository().use { git ->
@@ -844,19 +828,18 @@ open class GitRepository : SCM {
             val futures: MutableList<Future<*>> = ArrayList()
 
             for (commit in commits) {
-                // Submitting tasks to the thread pool
                 val future = executorService.submit {
                     val dataBaseUtil1 = DataBaseUtil(dataBaseUtil!!.url)
-                    val commitEntity = dataBaseUtil1.getCommit(projectId!!, commit.name)
+                    val commitEntity = dataBaseUtil1.getCommit(projectId!!, commit.name) ?: return@submit
                     val dev =
-                        developersMap.computeIfAbsent(commitEntity!!.authorEmail) { k: String? ->
-                            DeveloperInfo(
-                                commitEntity,
-                                commit
-                            )
-                        }
-                    dev.updateByCommit(commitEntity, commit)
-                    dataBaseUtil1.closeConnection()
+                            developersMap.computeIfAbsent(commitEntity.authorEmail) { k: String? ->
+                                DeveloperInfo(
+                                    commitEntity,
+                                    commit
+                                )
+                            }
+                        dev.updateByCommit(commitEntity, commit)
+                        dataBaseUtil1.closeConnection()
                 }
                 futures.add(future)
             }
@@ -968,7 +951,6 @@ open class GitRepository : SCM {
         }
     }
 
-    @Throws(IOException::class)
     private fun getActualRefObjectId(ref: Ref, repo: Repository): ObjectId {
         val repoPeeled = repo.refDatabase.peel(ref)
         if (repoPeeled.peeledObjectId != null) {
@@ -1014,7 +996,6 @@ open class GitRepository : SCM {
      * @return    `name` successfully parsed as an int
      * @throws NumberFormatException
      */
-    @Throws(NumberFormatException::class)
     private fun getSystemProperty(name: String): Int {
         val `val` = System.getProperty(name)
         return `val`.toInt()
@@ -1024,7 +1005,7 @@ open class GitRepository : SCM {
         this.repoName = repoName
     }
 
-    fun setPath(path: String?) {
+    fun setPath(path: String) {
         this.path = PathUtils.fullPath(path)
     }
 
@@ -1082,7 +1063,7 @@ open class GitRepository : SCM {
         private val developersMap = ConcurrentHashMap<String, DeveloperInfo>()
         private val filePathMap = ConcurrentHashMap<String, Long>()
 
-        fun singleProject(path: String?): SCMRepository {
+        fun singleProject(path: String): SCMRepository {
             return GitRepository(path).info()
         }
 
@@ -1090,7 +1071,6 @@ open class GitRepository : SCM {
             return GitRepository(path, singleParentOnly, dataBaseUtil).info()
         }
 
-        @JvmOverloads
         fun allProjectsIn(path: String?, singleParentOnly: Boolean = false): Array<SCMRepository> {
             val repos: MutableList<SCMRepository> = ArrayList()
 

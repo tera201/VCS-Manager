@@ -6,7 +6,7 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger name="org.tera201.vcsmanager" level="INFO" additivity="false">
+        <Logger level="INFO" additivity="false">
             <AppenderRef ref="Console"/>
         </Logger>
         <Root level="error">

@@ -1,15 +1,11 @@
-package org.tera201.vcsmanager;
+package org.tera201.vcsmanager
 
-public class RepoDrillerException extends RuntimeException{
+class RepoDrillerException : RuntimeException {
+    constructor(msg: String?) : super(msg)
 
-	private static final long serialVersionUID = 1L;
+    constructor(e: Exception?) : super(e)
 
-	public RepoDrillerException(String msg) {
-		super(msg);
-	}
-
-	public RepoDrillerException(Exception e) {
-		super(e);
-	}
-
+    companion object {
+        private const val serialVersionUID = 1L
+    }
 }

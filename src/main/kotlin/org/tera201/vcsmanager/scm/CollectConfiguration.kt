@@ -1,45 +1,39 @@
-package org.tera201.vcsmanager.scm;
+package org.tera201.vcsmanager.scm
 
-import org.tera201.vcsmanager.filter.diff.DiffFilter;
-import org.tera201.vcsmanager.filter.diff.NoDiffFilter;
+import org.tera201.vcsmanager.filter.diff.DiffFilter
+import org.tera201.vcsmanager.filter.diff.NoDiffFilter
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-
-public class CollectConfiguration {
-    private boolean sourceCode = false;
-    private boolean diff = false;
-    private boolean branches = false;
-    private boolean commitMessages = false;
-    private List<DiffFilter> diffFilters = Collections.singletonList(new NoDiffFilter());
+class CollectConfiguration {
+    var isCollectingSourceCode: Boolean = false
+        private set
+    var isCollectingDiffs: Boolean = false
+        private set
+    var isCollectingBranches: Boolean = false
+        private set
+    var isCollectingCommitMessages: Boolean = false
+        private set
+    var diffFilters: List<DiffFilter> = listOf<DiffFilter>(NoDiffFilter())
+        private set
 
     /**
      * Configures repodriller to retrieve the current source code of each modified file.
      * @return the current collect configuration
      */
-    public CollectConfiguration sourceCode() {
-        this.sourceCode = true;
-        return this;
-    }
+    fun sourceCode(): CollectConfiguration = apply { isCollectingSourceCode = true }
 
     /**
      * Configures repodriller to retrieve the diffs of all modified files in a commit.
      * @return the current collect configuration
      */
-    public CollectConfiguration diffs () {
-        this.diff = true;
-        return this;
-    }
-    
+    fun diffs(): CollectConfiguration = apply { isCollectingDiffs = true }
+
     /**
      * Configures repodriller to retrieve diffs from a commit based on the specified filters
      * @return the current collect configuration
      */
-    public CollectConfiguration diffs(DiffFilter... diffFilters) {
-    		this.diff = true;
-    		this.diffFilters = Arrays.asList(diffFilters);
-    		return this;
+    fun diffs(vararg diffFilters: DiffFilter): CollectConfiguration = apply {
+        isCollectingDiffs = true
+        this.diffFilters = diffFilters.toList()
     }
 
     /**
@@ -47,32 +41,25 @@ public class CollectConfiguration {
      * Without this configuration, Commit#isMainBranch does not work.
      * @return the current collect configuration
      */
-    public CollectConfiguration branches() {
-        this.branches = true;
-        return this;
-    }
+    fun branches(): CollectConfiguration = apply { isCollectingBranches = true }
 
     /**
      * Configures repodriller to extract the entire commit message of a commit
      * @return the current collect configuration
      */
-    public CollectConfiguration commitMessages() {
-        this.commitMessages = true;
-        return this;
-    }
+    fun commitMessages(): CollectConfiguration = apply { isCollectingCommitMessages = true }
+
 
     /**
      * Configures repodriller to extract just the basic information of a repository,
      * such as authors, files changed, and commit dates.
      * @return the current collect configuration
      */
-    public CollectConfiguration basicOnly() {
-        sourceCode = false;
-        diff = false;
-        branches = false;
-        commitMessages = false;
-
-        return this;
+    fun basicOnly(): CollectConfiguration = apply {
+        isCollectingSourceCode = false
+        isCollectingDiffs = false
+        isCollectingBranches = false
+        isCollectingCommitMessages = false
     }
 
     /**
@@ -80,32 +67,10 @@ public class CollectConfiguration {
      * meaning, source code, diff, branches, and commit messages
      * @return the current collect configuration
      */
-    public CollectConfiguration everything () {
-        sourceCode = true;
-        diff = true;
-        branches = true;
-        commitMessages = true;
-
-        return this;
-    }
-
-    public boolean isCollectingSourceCode () {
-        return sourceCode;
-    }
-
-    public boolean isCollectingBranches () {
-        return branches;
-    }
-
-    public boolean isCollectingCommitMessages () {
-        return commitMessages;
-    }
-
-    public boolean isCollectingDiffs () {
-        return diff;
-    }
-    
-    public List<DiffFilter> getDiffFilters() {
-    		return this.diffFilters;
+    fun everything(): CollectConfiguration = apply {
+        isCollectingSourceCode = true
+        isCollectingDiffs = true
+        isCollectingBranches = true
+        isCollectingCommitMessages = true
     }
 }

@@ -1,24 +1,11 @@
-package org.tera201.vcsmanager.filter.diff;
+package org.tera201.vcsmanager.filter.diff
 
-import org.tera201.vcsmanager.util.RDFileUtils;
-
-import java.util.List;
+import org.tera201.vcsmanager.util.RDFileUtils.fileNameHasIsOfType
 
 /**
  * Only process diffs on files with certain file extensions.
- * 
+ *
  */
-public class OnlyDiffsWithFileTypes implements DiffFilter {
-
-	private List<String> fileExtensions;
-	
-	public OnlyDiffsWithFileTypes(List<String> fileExtensions) {
-		this.fileExtensions = fileExtensions;
-	}
-	
-	@Override
-	public boolean accept(String diffEntryPath) {
-		return RDFileUtils.fileNameHasIsOfType(diffEntryPath, this.fileExtensions);
-	}
-
+class OnlyDiffsWithFileTypes(private val fileExtensions: List<String>) : DiffFilter {
+    override fun accept(diffEntryPath: String): Boolean = fileNameHasIsOfType(diffEntryPath, this.fileExtensions)
 }

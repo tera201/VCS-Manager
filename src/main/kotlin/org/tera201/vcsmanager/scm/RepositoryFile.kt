@@ -1,46 +1,29 @@
-package org.tera201.vcsmanager.scm;
+package org.tera201.vcsmanager.scm
 
-import org.tera201.vcsmanager.util.RDFileUtils;
+import org.tera201.vcsmanager.util.RDFileUtils.readFile
+import java.io.File
+import java.util.*
 
-import java.io.File;
+class RepositoryFile(val file: File) {
+    fun fileNameEndsWith(suffix: String): Boolean {
+        return file.name.lowercase(Locale.getDefault()).endsWith(suffix.lowercase(Locale.getDefault()))
+    }
 
-public class RepositoryFile {
+    fun fileNameMatches(regex: String): Boolean {
+        return file.name.lowercase(Locale.getDefault()).matches(regex.toRegex())
+    }
 
-	private File file;
+    val fullName: String
+        get() = file.absolutePath
 
-	public RepositoryFile(File file) {
-		this.file = file;
-	}
+    fun fileNameContains(text: String): Boolean {
+        return file.name.lowercase(Locale.getDefault()).contains(text)
+    }
 
-	public File getFile() {
-		return file;
-	}
+    val sourceCode: String
+        get() = readFile(file)
 
-	public boolean fileNameEndsWith(String suffix) {
-		return file.getName().toLowerCase().endsWith(suffix.toLowerCase());
-	}
-
-	public boolean fileNameMatches(String regex) {
-		return file.getName().toLowerCase().matches(regex);
-	}
-
-	public String getFullName() {
-		return file.getAbsolutePath();
-	}
-
-	public boolean fileNameContains(String text) {
-		return file.getName().toLowerCase().contains(text);
-	}
-	
-	public String getSourceCode() {
-		return RDFileUtils.readFile(getFile());
-	}
-	
-	@Override
-	public String toString() {
-		return "[" + file.getAbsolutePath() + "]";
-	}
-	
-	
-	
+    override fun toString(): String {
+        return "[" + file.absolutePath + "]"
+    }
 }

@@ -1,13 +1,11 @@
-package org.tera201.vcsmanager.scm;
+package org.tera201.vcsmanager.scm
 
-import org.tera201.vcsmanager.util.DataBaseUtil;
+import org.tera201.vcsmanager.util.DataBaseUtil
 
-public abstract class GitRemoteRepositoryBuilder {
-
-	protected String tempDir;
-	protected boolean bare = false;
-	protected String username;
-	protected String password;
-	protected DataBaseUtil dataBaseUtil;
-	
+abstract class GitRemoteRepositoryBuilder {
+	protected var tempDir: String? = null
+	protected var bare: Boolean = false
+    protected var username: String? = null
+    protected var password: String? = null
+    protected var dataBaseUtil: DataBaseUtil? = null
 }
