@@ -1,53 +1,37 @@
-package org.tera201.vcsmanager.domain;
+package org.tera201.vcsmanager.domain
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*
 
-public class DiffParser {
+class DiffParser(val fullDiff: String) {
+    val diffBlocks: MutableList<DiffBlock> = ArrayList()
 
-	private List<DiffBlock> diffBlocks;
+    init {
+        extractDiffBlocks()
+    }
 
-	private String fullDiff;
-	
-	public DiffParser(String fullDiff) {
-		this.fullDiff = fullDiff;
-		diffBlocks = new ArrayList<>();
-		
-		extractDiffBlocks();
-	}
+    private fun extractDiffBlocks() {
+        val lines = fullDiff.split("\n").filterNot { it.isEmpty() || it.startsWith("\r") }
+        val linesNoHeader = lines.drop(4)
 
-	private void extractDiffBlocks() {
-		String[] lines = fullDiff.replace("\r", "").split("\n");
-		String[] linesNoHeader = Arrays.copyOfRange(lines, 4, lines.length);
+        var currentDiff = StringBuilder()
+        var currentInADiff = false
 
-		StringBuilder currentDiff = new StringBuilder();
-		boolean currentInADiff = false;
-		
-		for(int i = 0; i < linesNoHeader.length; i++) {
-			String currentLine = linesNoHeader[i];
-			if(currentLine.startsWith("@@ -") && !currentInADiff) {
-				currentInADiff = true;
-			}
-			else if(currentLine.startsWith("@@ -") && currentInADiff) {
-				diffBlocks.add(new DiffBlock(currentDiff.toString()));
-				currentDiff = new StringBuilder();
-				currentInADiff = false;
-				i--;
-			}
+        for (line in linesNoHeader) {
+            when {
+                line.startsWith("@@ -") && !currentInADiff -> {
+                    currentInADiff = true
+                }
+                line.startsWith("@@ -") && currentInADiff -> {
+                    diffBlocks.add(DiffBlock(currentDiff.toString()))
+                    currentDiff = StringBuilder()
+                    currentInADiff = false
+                }
+            }
 
-			if(currentInADiff) currentDiff.append(currentLine + "\n");
-		}
-		diffBlocks.add(new DiffBlock(currentDiff.toString()));
-
-	}
-	
-	public List<DiffBlock> getBlocks() {
-		return diffBlocks;
-	}
-
-	public String getFullDiff() {
-		return fullDiff;
-	}
-
+            if (currentInADiff) {
+                currentDiff.append("$line\n")
+            }
+        }
+        diffBlocks.add(DiffBlock(currentDiff.toString()))
+    }
 }

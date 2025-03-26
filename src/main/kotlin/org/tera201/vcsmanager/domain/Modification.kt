@@ -1,85 +1,45 @@
-package org.tera201.vcsmanager.domain;
+package org.tera201.vcsmanager.domain
 
-import java.io.File;
+import java.io.File
+import java.util.*
 
-public class Modification {
+data class Modification(
+    val oldPath: String,
+    val newPath: String?,
+    val type: ModificationType,
+    val diff: String,
+    val sourceCode: String
+) {
+    var added: Int = 0
+        private set
+    var removed: Int = 0
+        private set
 
-	private String oldPath;
-	private String newPath;
-	private ModificationType type;
-	private String diff;
-	private String sourceCode;
-	private int added;
-	private int removed;
+    init {
+        diff.replace("\r", "").split("\n").forEach { line ->
+            when {
+                line.startsWith("+") && !line.startsWith("+++") -> added++
+                line.startsWith("-") && !line.startsWith("---") -> removed++
+            }
+        }
+    }
 
-	public Modification(String oldPath, String newPath, ModificationType type, String diff, String sourceCode) {
-		this.oldPath = oldPath;
-		this.newPath = newPath;
-		this.type = type;
-		this.diff = diff;
-		this.sourceCode = sourceCode;
-		
-		for(String line : diff.replace("\r", "").split("\n")) {
-			if(line.startsWith("+") && !line.startsWith("+++")) added++;
-			if(line.startsWith("-") && !line.startsWith("---")) removed++;
-		}
-		
-	}
+    override fun toString(): String {
+        return ("Modification [oldPath=" + oldPath + ", newPath=" + newPath + ", type=" + type
+                + "]")
+    }
 
-	public String getOldPath() {
-		return oldPath;
-	}
+    fun wasDeleted(): Boolean = type == ModificationType.DELETE
 
-	public String getNewPath() {
-		return newPath;
-	}
+    fun fileNameEndsWith(suffix: String): Boolean =
+        newPath?.lowercase(Locale.getDefault())?.endsWith(suffix.lowercase(Locale.getDefault())) ?: false
 
-	public ModificationType getType() {
-		return type;
-	}
+    fun fileNameMatches(regex: String): Boolean =
+        newPath?.lowercase(Locale.getDefault())?.matches(regex.toRegex()) ?: false
 
-	public String getDiff() {
-		return diff;
-	}
-
-	public String getSourceCode() {
-		return sourceCode;
-	}
-
-	@Override
-	public String toString() {
-		return "Modification [oldPath=" + oldPath + ", newPath=" + newPath + ", type=" + type
-				+ "]";
-	}
-
-	public boolean wasDeleted() {
-		return type.equals(ModificationType.DELETE);
-	}
-
-	public boolean fileNameEndsWith(String suffix) {
-		return newPath.toLowerCase().endsWith(suffix.toLowerCase());
-	}
-
-	public boolean fileNameMatches(String regex) {
-		return newPath.toLowerCase().matches(regex);
-	}
-
-	public String getFileName() {
-		String thePath = newPath!=null && !newPath.equals("/dev/null") ? newPath : oldPath;
-		if(!thePath.contains(File.separator)) return thePath;
-		
-		String[] fileName = thePath.split(File.separator);
-		return fileName[fileName.length-1];
-	}
-	
-
-	public int getAdded() {
-		return added;
-	}
-	
-	public int getRemoved() {
-		return removed;
-	}
-
-	
+    val fileName: String
+        get() {
+            val thePath = newPath?.takeIf { it != "/dev/null" } ?: oldPath
+            return if (!thePath.contains(File.separator)) thePath else thePath.split(File.separator).last()
+        }
 }

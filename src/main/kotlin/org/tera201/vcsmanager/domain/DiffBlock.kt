@@ -1,90 +1,59 @@
-package org.tera201.vcsmanager.domain;
+package org.tera201.vcsmanager.domain
 
-import org.tera201.vcsmanager.RepoDrillerException;
+import org.tera201.vcsmanager.RepoDrillerException
+import java.util.regex.Pattern
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+class DiffBlock(val diffBlock: String) {
+    private val d1: Int
+    private val d2: Int
+    private val d3: Int
+    private val d4: Int
 
-public class DiffBlock {
+    private val lines: Array<String> = diffBlock.replace("\r", "").split("\n").filter { it.isNotEmpty() }.toTypedArray()
 
-	private int d1;
-	private int d2;
-	private int d3;
-	private int d4;
-	
-	private String[] lines;
-	private String diffBlock;
+    init {
+        val positions = lines[0]
+        val p = Pattern.compile("@@ -(\\d*),(\\d*) \\+(\\d*),(\\d*) @@.*")
+        val matcher = p.matcher(positions)
 
-	public DiffBlock(String diffBlock) {
-		this.diffBlock = diffBlock;
-		this.lines = diffBlock.replace("\r", "").split("\n");
-		
-		getLinePositions();
-	}
-	
-	private void getLinePositions() {
-		String positions = lines[0];
-		Pattern p = Pattern.compile("@@ -(\\d*),(\\d*) \\+(\\d*),(\\d*) @@.*");
-		Matcher matcher = p.matcher(positions);
-		
-		if(matcher.matches()) {
-			d1 = Integer.parseInt(matcher.group(1));
-			d2 = Integer.parseInt(matcher.group(2));
-			d3 = Integer.parseInt(matcher.group(3));
-			d4 = Integer.parseInt(matcher.group(4));
-		} else {
-			throw new RepoDrillerException("Impossible to get line positions in this diff: " + diffBlock);
-		}
-	}
+        if (matcher.matches()) {
+            d1 = matcher.group(1).toInt()
+            d2 = matcher.group(2).toInt()
+            d3 = matcher.group(3).toInt()
+            d4 = matcher.group(4).toInt()
+        } else {
+            throw RepoDrillerException("Impossible to get line positions in this diff: $diffBlock")
+        }
+    }
 
-	public String[] getLines() {
-		return lines;
-	}
+    private fun getLines(start: Int, qtyLines: Int, ch: String): List<DiffLine> {
+        val oldLines = mutableListOf<DiffLine>()
+        var counter = start
 
-	private List<DiffLine> getLines(int start, int qtyLines, String ch) {
-		List<DiffLine> oldLines = new ArrayList<>();
-		int counter = start; 
-		for(String line : lines) {
-			if(line.startsWith(ch) || line.startsWith(" ")) {
-				oldLines.add(new DiffLine(counter, line.substring(1), typeOf(line)));
-				counter++;
-			}
-		}
-		if(counter!=start+qtyLines) throw new RepoDrillerException("malformed diff");
-		
-		return oldLines;
-		
-	}
-	
-	private DiffLineType typeOf(String line) {
-		if(line.startsWith(" ")) return DiffLineType.KEPT;
-		if(line.startsWith("+")) return DiffLineType.ADDED;
-		if(line.startsWith("-")) return DiffLineType.REMOVED;
-		throw new RepoDrillerException("type of diff line not recognized: " + line);
-	}
+        for (line in lines) {
+            if (line.startsWith(ch) || line.startsWith(" ")) {
+                oldLines.add(DiffLine(counter, line.substring(1), typeOf(line)))
+                counter++
+            }
+        }
 
-	public List<DiffLine> getLinesInOldFile() {
-		return getLines(d1, d2, "-");
-	}
-	
-	public Optional<DiffLine> getLineInOldFile(int line) {
-		return getLinesInOldFile().stream().filter(x -> x.getLineNumber() == line).findFirst();
-	}
+        if (counter != start + qtyLines) throw RepoDrillerException("Malformed diff")
+        return oldLines
+    }
 
-	public Optional<DiffLine> getLineInNewFile(int line) {
-		return getLinesInNewFile().stream().filter(x -> x.getLineNumber() == line).findFirst();
-	}
+    private fun typeOf(line: String): DiffLineType =
+        when {
+            line.startsWith(" ") -> DiffLineType.KEPT
+            line.startsWith("+") -> DiffLineType.ADDED
+            line.startsWith("-") -> DiffLineType.REMOVED
+            else -> throw RepoDrillerException("Type of diff line not recognized: $line")
+        }
 
-	public List<DiffLine> getLinesInNewFile() {
-		return getLines(d3, d4, "+");
-	}
-	
-	public String getDiffBlock() {
-		return diffBlock;
-	}
-	
-	
+    val linesInOldFile: List<DiffLine> = getLines(d1, d2, "-")
+
+    fun getLineInOldFile(line: Int): DiffLine? = linesInOldFile.find { it.lineNumber == line }
+
+    fun getLineInNewFile(line: Int): DiffLine? = linesInNewFile.find { it.lineNumber == line }
+
+    val linesInNewFile: List<DiffLine> = getLines(d3, d4, "+")
 }

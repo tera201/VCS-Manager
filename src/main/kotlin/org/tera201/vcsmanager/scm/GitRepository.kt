@@ -339,7 +339,7 @@ open class GitRepository : SCM {
                 for (diff in diffsForTheCommit) {
                     if (this.diffFiltersAccept(diff)) {
                         val m = this.diffToModification(repo, diff)
-                        commit.addModification(m)
+                        commit.modifications.add(m)
                     }
                 }
 
