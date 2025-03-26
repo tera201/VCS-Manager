@@ -612,9 +612,7 @@ open class GitRepository : SCM {
     private val allFilesInPath: List<File>
         get() = RDFileUtils.getAllFilesInPath(path)
 
-    override fun totalCommits(): Long {
-        return changeSets.size.toLong()
-    }
+    override val totalCommits = changeSets.size.toLong()
 
     override fun repositoryAllSize(): Map<String, CommitSize> {
         return repositorySize(true, null, null)
@@ -911,7 +909,7 @@ open class GitRepository : SCM {
                             blameResult,
                             devs,
                             dataBaseUtil1,
-                            projectId,
+                            projectId!!,
                             second,
                             head.name
                         )

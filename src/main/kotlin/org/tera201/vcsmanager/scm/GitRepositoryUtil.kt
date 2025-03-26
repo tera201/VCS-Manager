@@ -7,7 +7,6 @@ import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.diff.Edit
 import org.eclipse.jgit.diff.RawTextComparator
 import org.eclipse.jgit.lib.Constants
-import org.eclipse.jgit.lib.ObjectReader
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.util.io.DisabledOutputStream
@@ -18,21 +17,23 @@ import org.tera201.vcsmanager.util.FileEntity
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 
 object GitRepositoryUtil {
-    private val fileSizeCache: MutableMap<String, Long?> = ConcurrentHashMap()
+    private val fileSizeCache = mutableMapOf<String, Long?>()
 
     @Throws(IOException::class)
     fun analyzeCommit(commit: RevCommit, git: Git, dev: DeveloperInfo) {
         DiffFormatter(DisabledOutputStream.INSTANCE).use { diffFormatter ->
-            val parent = if (commit.parentCount > 0) commit.getParent(0) else null
-            diffFormatter.setRepository(git.repository)
-            diffFormatter.setDiffComparator(RawTextComparator.DEFAULT)
-            diffFormatter.isDetectRenames = true
-            val diffs = diffFormatter.scan(parent, commit)
-            for (diff in diffs) {
-                dev.processDiff(diff, git.repository)
+            commit.parents[0]?.let { parent ->
+                diffFormatter.apply {
+                    setRepository(git.repository)
+                    setDiffComparator(RawTextComparator.DEFAULT)
+                    isDetectRenames = true
+                }
+
+                diffFormatter.scan(parent, commit).forEach { diff ->
+                    dev.processDiff(diff, git.repository)
+                }
             }
         }
     }
@@ -40,146 +41,127 @@ object GitRepositoryUtil {
     @Throws(IOException::class)
     fun getCommitsFiles(commit: RevCommit, git: Git): Map<String, FileEntity> {
         val out = ByteArrayOutputStream()
+        val paths: MutableMap<String, FileEntity> = HashMap()
         DiffFormatter(out).use { diffFormatter ->
-            val parent = if (commit.parentCount > 0) commit.getParent(0) else null
-            diffFormatter.setRepository(git.repository)
-            diffFormatter.setDiffComparator(RawTextComparator.DEFAULT)
-            diffFormatter.isDetectRenames = true
-            val diffs = diffFormatter.scan(parent, commit)
-            val paths: MutableMap<String, FileEntity> = HashMap()
-
-            for (diff in diffs) {
-                var fileAdded = 0
-                var fileDeleted = 0
-                var fileModified = 0
-                var linesAdded = 0
-                var linesDeleted = 0
-                var linesModified = 0
-                var changes = 0
-                when (diff.changeType) {
-                    DiffEntry.ChangeType.ADD -> fileAdded++
-                    DiffEntry.ChangeType.DELETE -> fileDeleted++
-                    DiffEntry.ChangeType.MODIFY -> fileModified++
-                    DiffEntry.ChangeType.RENAME -> fileModified++
-                    DiffEntry.ChangeType.COPY -> fileAdded++
+            commit.parents[0]?.let { parent ->
+                diffFormatter.apply {
+                    setRepository(git.repository)
+                    setDiffComparator(RawTextComparator.DEFAULT)
+                    isDetectRenames = true
                 }
 
-                val editList = diffFormatter.toFileHeader(diff).toEditList()
-                for (edit in editList) {
-                    when (edit.type) {
-                        Edit.Type.INSERT -> {
-                            linesAdded += edit.lengthB
-                            changes += edit.lengthB
-                        }
-
-                        Edit.Type.DELETE -> {
-                            linesDeleted += edit.lengthA
-                            changes += edit.lengthA
-                        }
-
-                        Edit.Type.REPLACE -> {
-                            //TODO getLengthA (removed)  getLengthB (added) - maybe max(A,B) or just B
-                            linesModified += edit.lengthA + edit.lengthB
-                            changes += edit.lengthA + edit.lengthB
-                        }
-
-                        Edit.Type.EMPTY -> TODO()
-                    }
+                diffFormatter.scan(parent, commit).forEach { diff ->
+                    val fileEntity = paths.getOrPut(diff.newPath) { FileEntity() }
+                    fileEntity.applyChanges(diff, diffFormatter, out.size())
                 }
-                paths.putIfAbsent(diff.newPath, FileEntity())
-                paths[diff.newPath]!!
-                    .plus(
-                        fileAdded,
-                        fileDeleted,
-                        fileModified,
-                        linesAdded,
-                        linesDeleted,
-                        linesModified,
-                        changes,
-                        out.size()
-                    )
             }
-            return paths
         }
+        return paths
     }
 
     fun processCommitSize(commit: RevCommit, git: Git): Long {
-        var projectSize: Long = 0
-        var reader: ObjectReader? = null
-        try {
-            reader = git.repository.newObjectReader()
+        var projectSize = 0L
+        git.repository.newObjectReader().use { reader ->
             TreeWalk(git.repository).use { treeWalk ->
-                treeWalk.addTree(commit.tree)
-                treeWalk.isRecursive = true
+                treeWalk.apply {
+                    addTree(commit.tree)
+                    isRecursive = true
+                }
+
                 while (treeWalk.next()) {
                     val objectId = treeWalk.getObjectId(0)
                     val objectHash = objectId.name
-                    val size = fileSizeCache.getOrDefault(objectHash, null)
-                    if (size == null) {
-                        val loader = reader.open(objectId)
-                        if (loader.type == Constants.OBJ_BLOB) {
-                            projectSize += loader.size
-                            fileSizeCache[objectHash] = loader.size
-                        }
-                    } else projectSize += size
+                    projectSize += fileSizeCache.getOrPut(objectHash) {
+                        reader.open(objectId).takeIf { it.type == Constants.OBJ_BLOB }?.size
+                    } ?: 0L
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } finally {
-            reader?.close()
         }
         return projectSize
     }
 
     fun updateFileOwnerBasedOnBlame(blameResult: BlameResult, developers: Map<String?, DeveloperInfo>) {
-        val linesOwners: MutableMap<String, Int> = HashMap()
-        val linesSizes: MutableMap<String, Long> = HashMap()
-        if (blameResult != null) {
-            for (i in 0..<blameResult.resultContents.size()) {
-                val authorEmail = blameResult.getSourceAuthor(i).emailAddress
-                val lineSize = blameResult.resultContents.getString(i).toByteArray().size.toLong()
-                linesSizes.merge(authorEmail, lineSize) { a: Long?, b: Long? ->
-                    java.lang.Long.sum(
-                        a!!,
-                        b!!
-                    )
-                }
-                linesOwners.merge(authorEmail, 1) { a: Int?, b: Int? -> Integer.sum(a!!, b!!) }
-            }
-            linesOwners.forEach { (key: String?, value: Int?) -> developers[key]!!.increaseActualLinesOwner(value.toLong()) }
-            linesSizes.forEach { (key: String?, value: Long?) -> developers[key]!!.increaseActualLinesSize(value) }
+        val linesOwners = mutableMapOf<String, Int>()
+        val linesSizes = mutableMapOf<String, Long>()
 
-            linesOwners.entries.maxByOrNull { it.value }?.also { developers[it.key]!!
-                .addOwnedFile(blameResult.resultPath) }
-        } else println("Blame for file " + blameResult.resultPath + " not found")
+        for (i in 0..<blameResult.resultContents.size()) {
+            val authorEmail = blameResult.getSourceAuthor(i).emailAddress
+            val lineSize = blameResult.resultContents.getString(i).toByteArray().size.toLong()
+            linesSizes.merge(authorEmail, lineSize, Long::plus)
+            linesOwners.merge(authorEmail, 1, Int::plus)
+        }
+        linesOwners.forEach { (key: String?, value: Int?) -> developers[key]!!.increaseActualLinesOwner(value.toLong()) }
+        linesSizes.forEach { (key: String?, value: Long?) -> developers[key]!!.increaseActualLinesSize(value) }
+
+        linesOwners.entries.maxByOrNull { it.value }?.also {
+            developers[it.key]!!
+                .addOwnedFile(blameResult.resultPath)
+        }
+
     }
 
     fun updateFileOwnerBasedOnBlame(
         blameResult: BlameResult,
-        devs: Map<String?, String?>,
+        devs: Map<String, String>,
         dataBaseUtil: DataBaseUtil,
         projectId: Int,
         blameFileId: Int,
         headHash: String
     ) {
-        val blameEntityMap: MutableMap<String, BlameEntity> = HashMap()
-        if (blameResult != null) {
-            for (i in 0..<blameResult.resultContents.size()) {
-                val author = blameResult.getSourceAuthor(i)
-                val commitHash = blameResult.getSourceCommit(i).name
-                val lineSize = blameResult.resultContents.getString(i).toByteArray().size.toLong()
-                val blameEntity = blameEntityMap.computeIfAbsent(author.emailAddress) { key: String? ->
-                    BlameEntity(
-                        projectId,
-                        devs[key]!!, blameFileId, ArrayList(), ArrayList(), 0
-                    )
-                }
-                blameEntity.blameHashes.add(headHash)
-                blameEntity.lineIds.add(i)
-                blameEntity.lineSize = blameEntity.lineSize + lineSize
+        val blameEntities = mutableMapOf<String, BlameEntity>()
+        for (i in 0..<blameResult.resultContents.size()) {
+            val author = blameResult.getSourceAuthor(i)
+            val commitHash = blameResult.getSourceCommit(i).name
+            val lineSize = blameResult.resultContents.getString(i).toByteArray().size.toLong()
+            blameEntities.computeIfAbsent(author.emailAddress) {
+                BlameEntity(projectId, devs[it] ?: "", blameFileId, mutableListOf(), mutableListOf(), 0)
+            }.apply {
+                blameHashes.add(headHash)
+                lineIds.add(i)
+                this.lineSize += lineSize
             }
-        } else println("Blame for file " + blameResult.resultPath + " not found")
-        dataBaseUtil.insertBlame(blameEntityMap.values.stream().toList())
+        }
+
+        dataBaseUtil.insertBlame(blameEntities.values.toList())
+    }
+
+    private fun FileEntity.applyChanges(diff: DiffEntry, diffFormatter: DiffFormatter, diffSize: Int) {
+        var fileAdded = 0
+        var fileDeleted = 0
+        var fileModified = 0
+        var linesAdded = 0
+        var linesDeleted = 0
+        var linesModified = 0
+        var changes = 0
+
+        when (diff.changeType) {
+            DiffEntry.ChangeType.ADD -> fileAdded++
+            DiffEntry.ChangeType.DELETE -> fileDeleted++
+            DiffEntry.ChangeType.MODIFY, DiffEntry.ChangeType.RENAME -> fileModified++
+            DiffEntry.ChangeType.COPY -> fileAdded++
+        }
+
+        diffFormatter.toFileHeader(diff).toEditList().forEach { edit ->
+            when (edit.type) {
+                Edit.Type.INSERT -> {
+                    linesAdded += edit.lengthB
+                    changes += edit.lengthB
+                }
+
+                Edit.Type.DELETE -> {
+                    linesDeleted += edit.lengthA
+                    changes += edit.lengthA
+                }
+
+                Edit.Type.REPLACE -> {
+                    linesModified += edit.lengthA + edit.lengthB
+                    changes += edit.lengthA + edit.lengthB
+                }
+
+                Edit.Type.EMPTY -> return@forEach
+            }
+        }
+
+        plus(fileAdded, fileDeleted, fileModified, linesAdded, linesDeleted, linesModified, changes, diffSize)
     }
 }
