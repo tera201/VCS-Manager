@@ -1,13 +1,11 @@
-package org.tera201.vcsmanager.util;
+package org.tera201.vcsmanager.util
 
-public class PathUtils {
+object PathUtils {
+    fun fullPath(path: String): String? {
+        var path = path ?: return null
 
-    public static String fullPath(String path) {
-        if(path==null) return null;
+        if (path.startsWith("~")) path = path.replaceFirst("^~".toRegex(), System.getProperty("user.home"))
 
-        if(path.startsWith("~"))
-            path = path.replaceFirst("^~",System.getProperty("user.home"));
-
-        return path;
+        return path
     }
 }
