@@ -1,136 +1,130 @@
-package org.tera201.vcsmanager;
+package org.tera201.vcsmanager
 
-import org.apache.commons.io.FileUtils;
-import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.lib.Ref;
-import org.tera201.vcsmanager.scm.GitRemoteRepository;
-import org.tera201.vcsmanager.scm.GitRepository;
-import org.tera201.vcsmanager.scm.SCMRepository;
-import org.tera201.vcsmanager.scm.SingleGitRemoteRepositoryBuilder;
-import org.tera201.vcsmanager.scm.exceptions.CheckoutException;
-import org.tera201.vcsmanager.util.DataBaseUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.commons.io.FileUtils
+import org.eclipse.jgit.api.errors.GitAPIException
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import org.tera201.vcsmanager.scm.GitRemoteRepository
+import org.tera201.vcsmanager.scm.GitRepository
+import org.tera201.vcsmanager.scm.SCMRepository
+import org.tera201.vcsmanager.scm.SingleGitRemoteRepositoryBuilder
+import org.tera201.vcsmanager.scm.exceptions.CheckoutException
+import org.tera201.vcsmanager.util.DataBaseUtil
+import java.io.File
+import java.io.IOException
 
-import java.io.File;
-import java.io.IOException;
-import java.util.List;
-import java.util.stream.Collectors;
-
-public class BuildModel {
-
-  private static Logger log = LoggerFactory.getLogger(GitRepository.class);
-
-  public static void main(String[] args) throws GitAPIException, IOException {
-
-    String projectRoot = new File(".").getAbsolutePath();
-    String csvPath = projectRoot.replace(".", "csv-generated");
-    String tempDir = projectRoot.replace(".", "clonedGit");
-
-    new File(csvPath).mkdirs();
-
-    String gitUrl = "https://github.com/arnohaase/a-foundation.git";
-
-    BuildModel buildModel = new BuildModel();
-
-    SCMRepository repo = buildModel.getRepository(gitUrl, tempDir + "/a-foundation", tempDir + "/db");
-
-    long startTime = System.currentTimeMillis();
-    repo.getScm().dbPrepared();
-    long endTime = System.currentTimeMillis();
-    long executionTime = endTime - startTime;
-    System.out.println("dbPrepared executed in " + executionTime + " ms");
-
-    repo.getScm().getDeveloperInfo();
-  }
-
-  public SCMRepository createClone(String gitUrl) {
-    return GitRemoteRepository
+class BuildModel {
+    fun createClone(gitUrl: String): SCMRepository {
+        return GitRemoteRepository
             .hostedOn(gitUrl)
-            .buildAsSCMRepository();
-  }
+            .buildAsSCMRepository()
+    }
 
-  public SCMRepository createClone(String gitUrl, String path, String dataBaseDirPath) {
-    DataBaseUtil dataBaseUtil = new DataBaseUtil(dataBaseDirPath + "/repository.db");
-    dataBaseUtil.create();
-    return GitRemoteRepository
+    fun createClone(gitUrl: String, path: String, dataBaseDirPath: String): SCMRepository {
+        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
+        dataBaseUtil.create()
+        return GitRemoteRepository
             .hostedOn(gitUrl)
             .inTempDir(path)
             .dateBase(dataBaseUtil)
-            .buildAsSCMRepository();
-  }
+            .buildAsSCMRepository()
+    }
 
-  public SCMRepository createClone(String gitUrl, String path, String username, String password, String dataBaseDirPath) {
-    DataBaseUtil dataBaseUtil = new DataBaseUtil(dataBaseDirPath + "/repository.db");
-    dataBaseUtil.create();
-    return GitRemoteRepository
+    fun createClone(gitUrl: String, path: String, username: String, password: String, dataBaseDirPath: String ): SCMRepository {
+        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
+        dataBaseUtil.create()
+        return GitRemoteRepository
             .hostedOn(gitUrl)
             .inTempDir(path)
             .creds(username, password)
             .dateBase(dataBaseUtil)
-            .buildAsSCMRepository();
-  }
+            .buildAsSCMRepository()
+    }
 
-  public SCMRepository getRepository(String gitUrl, String path, String dataBaseDirPath) {
-    DataBaseUtil dataBaseUtil = new DataBaseUtil(dataBaseDirPath + "/repository.db");
-    dataBaseUtil.create();
-    return GitRemoteRepository
+    fun getRepository(gitUrl: String?, path: String?, dataBaseDirPath: String): SCMRepository {
+        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
+        dataBaseUtil.create()
+        return GitRemoteRepository
             .hostedOn(gitUrl)
             .inTempDir(path)
             .dateBase(dataBaseUtil)
-            .getAsSCMRepository();
-  }
+            .asSCMRepository
+    }
 
-  public SCMRepository getRepository(String projectPath, String dataBaseDirPath) {
-    DataBaseUtil dataBaseUtil = new DataBaseUtil(dataBaseDirPath + "/repository.db");
-    dataBaseUtil.create();
-    return new SingleGitRemoteRepositoryBuilder()
+    fun getRepository(projectPath: String?, dataBaseDirPath: String): SCMRepository {
+        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
+        dataBaseUtil.create()
+        return SingleGitRemoteRepositoryBuilder()
             .inTempDir(projectPath)
             .dateBase(dataBaseUtil)
-            .getAsSCMRepository();
-  }
+            .asSCMRepository
+    }
 
-  public String getRepoNameByUrl(String gitUrl) {
-    return GitRemoteRepository.repoNameFromURI(gitUrl);
-  }
+    fun getRepoNameByUrl(gitUrl: String): String {
+        return GitRemoteRepository.repoNameFromURI(gitUrl)
+    }
 
-  public GitRemoteRepository createRepo(String gitUrl) throws GitAPIException {
-    return GitRemoteRepository
+    @Throws(GitAPIException::class)
+    fun createRepo(gitUrl: String?): GitRemoteRepository {
+        return GitRemoteRepository
             .hostedOn(gitUrl)
-            .build();
-  }
-
-  public List<String> getBranches(SCMRepository repo) {
-    return repo.getScm().getAllBranches().stream().map(Ref::getName).collect(Collectors.toList());
-  }
-
-  public List<String> getTags(SCMRepository repo) {
-    return repo.getScm().getAllTags().stream().map(Ref::getName).collect(Collectors.toList());
-  }
-
-  public void checkout(SCMRepository repo, String branch) throws CheckoutException {
-    repo.getScm().checkoutTo(branch);
-  }
-
-  public void cleanData() {
-    String csvPath = System.getProperty("user.dir") + "/analyseGit";
-    String gitPath = System.getProperty("user.dir") + "/clonedGit";
-    try {
-      FileUtils.deleteDirectory(new File(csvPath));
-      FileUtils.deleteDirectory(new File(gitPath));
-    } catch (IOException e) {
-      log.info("Delete failed: " + e);
+            .build()
     }
-  }
 
-  public void removeRepo() {
-    String csvPath = System.getProperty("user.dir") + "/analyseGit";
-    String gitPath = System.getProperty("user.dir") + "/clonedGit";
-    try {
-      FileUtils.deleteDirectory(new File(csvPath));
-      FileUtils.deleteDirectory(new File(gitPath));
-    } catch (IOException e) {
-      log.info("Delete failed: " + e);
+    fun getBranches(repo: SCMRepository): List<String> = repo.scm.allBranches.map { it.name }
+
+    fun getTags(repo: SCMRepository): List<String> = repo.scm.allTags.map { it.name }
+
+    @Throws(CheckoutException::class)
+    fun checkout(repo: SCMRepository, branch: String) = repo.scm.checkoutTo(branch)
+
+    fun cleanData() {
+        val csvPath = System.getProperty("user.dir") + "/analyseGit"
+        val gitPath = System.getProperty("user.dir") + "/clonedGit"
+        try {
+            FileUtils.deleteDirectory(File(csvPath))
+            FileUtils.deleteDirectory(File(gitPath))
+        } catch (e: IOException) {
+            log.info("Delete failed: $e")
+        }
     }
-  }
+
+    fun removeRepo() {
+        val csvPath = System.getProperty("user.dir") + "/analyseGit"
+        val gitPath = System.getProperty("user.dir") + "/clonedGit"
+        try {
+            FileUtils.deleteDirectory(File(csvPath))
+            FileUtils.deleteDirectory(File(gitPath))
+        } catch (e: IOException) {
+            log.info("Delete failed: $e")
+        }
+    }
+
+    companion object {
+        private val log: Logger = LoggerFactory.getLogger(GitRepository::class.java)
+
+        @Throws(GitAPIException::class, IOException::class)
+        @JvmStatic
+        fun main(args: Array<String>) {
+            val projectRoot = File(".").absolutePath
+            val csvPath = projectRoot.replace(".", "csv-generated")
+            val tempDir = projectRoot.replace(".", "clonedGit")
+
+            File(csvPath).mkdirs()
+
+            val gitUrl = "https://github.com/arnohaase/a-foundation.git"
+
+            val buildModel = BuildModel()
+
+            val repo = buildModel.getRepository(gitUrl, "$tempDir/a-foundation", "$tempDir/db")
+
+            val startTime = System.currentTimeMillis()
+            repo.scm.dbPrepared()
+            val endTime = System.currentTimeMillis()
+            val executionTime = endTime - startTime
+            println("dbPrepared executed in $executionTime ms")
+
+            repo.scm.developerInfo
+        }
+    }
 }

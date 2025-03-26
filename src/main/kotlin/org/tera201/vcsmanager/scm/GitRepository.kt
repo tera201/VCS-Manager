@@ -1,991 +1,1103 @@
-package org.tera201.vcsmanager.scm;
+package org.tera201.vcsmanager.scm
 
-import kotlin.Pair;
-import org.apache.commons.io.FileUtils;
-import org.eclipse.jgit.api.*;
-import org.eclipse.jgit.api.ResetCommand.ResetType;
-import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.blame.BlameResult;
-import org.eclipse.jgit.diff.DiffEntry;
-import org.eclipse.jgit.diff.DiffEntry.ChangeType;
-import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.diff.RawTextComparator;
-import org.eclipse.jgit.lib.*;
-import org.eclipse.jgit.revwalk.RevCommit;
-import org.eclipse.jgit.revwalk.RevSort;
-import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.treewalk.*;
-import org.eclipse.jgit.util.io.DisabledOutputStream;
-import org.tera201.vcsmanager.RepoDrillerException;
-import org.tera201.vcsmanager.domain.*;
-import org.tera201.vcsmanager.filter.diff.DiffFilter;
-import org.tera201.vcsmanager.scm.entities.*;
-import org.tera201.vcsmanager.scm.exceptions.CheckoutException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.tera201.vcsmanager.util.CommitEntity;
-import org.tera201.vcsmanager.util.DataBaseUtil;
-import org.tera201.vcsmanager.util.PathUtils;
-import org.tera201.vcsmanager.util.RDFileUtils;
-
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
+import org.apache.commons.io.FileUtils
+import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.api.ListBranchCommand
+import org.eclipse.jgit.api.ResetCommand
+import org.eclipse.jgit.api.errors.GitAPIException
+import org.eclipse.jgit.blame.BlameResult
+import org.eclipse.jgit.diff.DiffEntry
+import org.eclipse.jgit.diff.DiffFormatter
+import org.eclipse.jgit.diff.RawTextComparator
+import org.eclipse.jgit.lib.*
+import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.revwalk.RevSort
+import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.treewalk.CanonicalTreeParser
+import org.eclipse.jgit.treewalk.EmptyTreeIterator
+import org.eclipse.jgit.util.io.DisabledOutputStream
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import org.tera201.vcsmanager.RepoDrillerException
+import org.tera201.vcsmanager.domain.*
+import org.tera201.vcsmanager.scm.entities.*
+import org.tera201.vcsmanager.scm.exceptions.CheckoutException
+import org.tera201.vcsmanager.util.*
+import org.tera201.vcsmanager.util.FileEntity
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.function.Consumer
+import java.util.stream.Collectors
+import java.util.stream.StreamSupport
 
 /* TODO Name: Sounds like it inherits SCMRepository, but it actually implements SCM. */
-public class GitRepository implements SCM {
-
-	/* Constants. */
-	private static final int MAX_SIZE_OF_A_DIFF = 100000;
-	private static final int DEFAULT_MAX_NUMBER_OF_FILES_IN_A_COMMIT = 5000;
-	private static final String BRANCH_MM = "mm"; /* TODO mm -> rd. */
-
-	/* Auto-determined. */
-	private String mainBranchName = null;
-	private int maxNumberFilesInACommit = -1; /* TODO Expose an API to control this value? Also in SubversionRepository. */
-	private int maxSizeOfDiff = -1; /* TODO Expose an API to control this value? Also in SubversionRepository. */
-
-	private CollectConfiguration collectConfig;
-
-	private static Logger log = LoggerFactory.getLogger(GitRepository.class);
-
-	private static final ConcurrentHashMap<String, DeveloperInfo> developersMap = new ConcurrentHashMap<>();
-	private static final ConcurrentHashMap<String, Long> filePathMap = new ConcurrentHashMap<>();
-
-	private String repoName = null;
-
-	/* User-specified. */
-	private String path = null;
-	private boolean firstParentOnly = false;
-	Map<ObjectId, Long> sizeCache = new ConcurrentHashMap<>();
-	protected DataBaseUtil dataBaseUtil;
-	protected Integer projectId;
-
-	/**
-	 * Intended for sub-classes.
-	 * Make sure you initialize appropriately with the Setters.
-	 */
-	protected GitRepository() {
-		this(null);
-	}
-
-	public GitRepository(String path) {
-		this(path, false);
-	}
-
-	public GitRepository(String path, boolean firstParentOnly) {
-		log.debug("Creating a GitRepository from path " + path);
-		setPath(path);
-		setFirstParentOnly(firstParentOnly);
-		maxNumberFilesInACommit = checkMaxNumberOfFiles();
-		maxSizeOfDiff = checkMaxSizeOfDiff();
-
-		this.collectConfig = new CollectConfiguration().everything();
-	}
-
-	public GitRepository(String path, boolean firstParentOnly, DataBaseUtil dataBaseUtil) {
-		log.debug("Creating a GitRepository from path " + path);
-		this.dataBaseUtil = dataBaseUtil;
-		String[] splitPath = path.replace("\\", "/").split("/");
-		setRepoName(splitPath[splitPath.length - 1]);
-		Integer projectId = dataBaseUtil.getProjectId(repoName, path);
-		this.projectId = Objects.requireNonNullElseGet(projectId, () -> dataBaseUtil.insertProject(repoName, path));
-		setPath(path);
-		setFirstParentOnly(firstParentOnly);
-
-		maxNumberFilesInACommit = checkMaxNumberOfFiles();
-		maxSizeOfDiff = checkMaxSizeOfDiff();
-
-		this.collectConfig = new CollectConfiguration().everything();
-	}
-
-	public static SCMRepository singleProject(String path) {
-		return new GitRepository(path).info();
-	}
-
-	public static SCMRepository singleProject(String path, boolean singleParentOnly, DataBaseUtil dataBaseUtil) {
-		return new GitRepository(path, singleParentOnly, dataBaseUtil).info();
-	}
-
-	public static SCMRepository[] allProjectsIn(String path) {
-		return allProjectsIn(path, false);
-	}
-
-	public static SCMRepository[] allProjectsIn(String path, boolean singleParentOnly) {
-		List<SCMRepository> repos = new ArrayList<>();
-
-		for (String dir : RDFileUtils.getAllDirsIn(path)) {
-			repos.add(singleProject(dir, singleParentOnly, null));
-		}
-
-		return repos.toArray(new SCMRepository[repos.size()]);
-	}
-
-	public SCMRepository info() {
-		try (Git git = openRepository(); RevWalk rw = new RevWalk(git.getRepository())) {
-			AnyObjectId headId = git.getRepository().resolve(Constants.HEAD);
-
-			RevCommit root = rw.parseCommit(headId);
-			rw.sort(RevSort.REVERSE);
-			rw.markStart(root);
-			RevCommit lastCommit = rw.next();
-
-			String origin = git.getRepository().getConfig().getString("remote", "origin", "url");
-
-			return new SCMRepository(this, origin, repoName, path, headId.getName(), lastCommit.getName());
-		} catch (Exception e) {
-			throw new RuntimeException("Couldn't create JGit instance with path " + path);
-		}
-	}
-
-	public SCMRepository getInfo() {
-		try (Git git = openRepository()) {
-			ObjectId head = git.getRepository().resolve(Constants.HEAD);
-
-			RevWalk rw = new RevWalk(git.getRepository());
-			RevCommit root = rw.parseCommit(head);
-			rw.sort(RevSort.REVERSE);
-			rw.markStart(root);
-			RevCommit lastCommit = rw.next();
-			String origin = git.getRepository().getConfig().getString("remote", "origin", "url");
-
-			repoName = (origin != null)? GitRemoteRepository.repoNameFromURI(origin) : repoName;
-
-			return new SCMRepository(this, origin, repoName, path, head.getName(), lastCommit.getName());
-		} catch (Exception e) {
-			throw new RuntimeException("Couldn't create JGit instance with path " + path);
-		}
-	}
-
-	public Git openRepository() throws IOException, GitAPIException {
-		Git git = Git.open(new File(path));
-		if (this.mainBranchName == null) {
-			this.mainBranchName = discoverMainBranchName(git);
-		}
-		return git;
-	}
-
-	private String discoverMainBranchName(Git git) throws IOException {
-		return git.getRepository().getBranch();
-	}
-
-	public ChangeSet getHead() {
-		RevWalk revWalk = null;
-		try (Git git = openRepository()) {
-			ObjectId head = git.getRepository().resolve(Constants.HEAD);
-
-			revWalk = new RevWalk(git.getRepository());
-			RevCommit r = revWalk.parseCommit(head);
-			git.close();
-			return new ChangeSet(r.getName(), convertToDate(r));
-
-		} catch (Exception e) {
-			throw new RuntimeException("error in getHead() for " + path, e);
-		} finally {
-			revWalk.close();
-		}
-	}
-
-	@Override
-	public List<ChangeSet> getChangeSets() {
-		try (Git git = openRepository()) {
-			List<ChangeSet> allCs;
-			if (!firstParentOnly) allCs = getAllCommits(git);
-			else allCs = firstParentsOnly(git);
-			git.close();
-			return allCs;
-		} catch (Exception e) {
-			throw new RuntimeException("error in getChangeSets for " + path, e);
-		}
-	}
-
-	@Override
-	public void createCommit(String message) {
-		try (Git git = openRepository()) {
-			Status status = git.status().call();
-			if(status.hasUncommittedChanges()) {
-			AddCommand add = git.add();
-				for (String entry : status.getModified()) {
-					add.addFilepattern(entry);
-				}
-				add.call();
-				git.commit().setMessage(message).call();
-			}
-		} catch (Exception e) {
-			throw new RuntimeException("error in create commit for " + path, e);
-		}
-	}
-
-	@Override
-	public void  resetLastCommitsWithMessage(String message) {
-		try (Git git = openRepository()) {
-			RevCommit commit = null;
-			for (RevCommit r : git.log().call()) {
-				if (!r.getFullMessage().contains(message)) {
-					commit = r;
-					break;
-				}
-			}
-			if (commit != null) {
-				git.reset().setMode(ResetType.MIXED).setRef(extractChangeSet(commit).getId()).call();
-			} else {
-				log.info("Reset doesn't required");
-			}
-
-		} catch (Exception e) {
-			throw new RuntimeException("Reset failed ", e);
-		}
-	}
-
-	private List<ChangeSet> firstParentsOnly(Git git) {
-		RevWalk revWalk = null;
-		try {
-			List<ChangeSet> allCs = new ArrayList<>();
-
-			revWalk = new RevWalk(git.getRepository());
-			revWalk.setRevFilter(new FirstParentFilter());
-			revWalk.sort(RevSort.TOPO);
-			Ref headRef = git.getRepository().findRef(Constants.HEAD);
-			RevCommit headCommit = revWalk.parseCommit(headRef.getObjectId());
-			revWalk.markStart(headCommit);
-			for (RevCommit revCommit : revWalk) {
-				allCs.add(extractChangeSet(revCommit));
-			}
-
-			return allCs;
-
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		} finally {
-			revWalk.close();
-		}
-	}
-
-	private List<ChangeSet> getAllCommits(Git git) throws GitAPIException, IOException {
-		List<ChangeSet> allCs = new ArrayList<>();
-
-		for (RevCommit r : git.log().call()) {
-			allCs.add(extractChangeSet(r));
-
-		}
-		return allCs;
-	}
-
-	private ChangeSet extractChangeSet(RevCommit r) {
-		String hash = r.getName();
-		GregorianCalendar date = convertToDate(r);
-
-		return new ChangeSet(hash, date);
-	}
-
-	private GregorianCalendar convertToDate(RevCommit revCommit) {
-		GregorianCalendar date = new GregorianCalendar();
-		date.setTimeZone(revCommit.getAuthorIdent().getTimeZone());
-		date.setTime(revCommit.getAuthorIdent().getWhen());
-
-		return date;
-	}
-
-	/**
-	 * Get the commit with this commit id.
-	 * Caveats:
-	 *   - If commit modifies more than maxNumberFilesInACommit, throws an exception
-	 *   - If one of the file diffs exceeds maxSizeOfDiff, the diffText is discarded
-	 *
-	 * @param id    The SHA1 hash that identifies a git commit.
-	 * @returns Commit 	The corresponding Commit, or null.
-	 */
-	@Override
-	public Commit getCommit(String id) {
-		try (Git git = openRepository()) {
-			/* Using JGit, this commit will be the first entry in the log beginning at id. */
-			Repository repo = git.getRepository();
-			Iterable<RevCommit> jgitCommits = git.log().add(repo.resolve(id)).call();
-			Iterator<RevCommit> itr = jgitCommits.iterator();
-
-			if (!itr.hasNext())
-				return null;
-			RevCommit jgitCommit = itr.next();
-
-			/* Extract metadata. */
-			Developer author = new Developer(jgitCommit.getAuthorIdent().getName(), jgitCommit.getAuthorIdent().getEmailAddress());
-			Developer committer = new Developer(jgitCommit.getCommitterIdent().getName(), jgitCommit.getCommitterIdent().getEmailAddress());
-			TimeZone authorTimeZone = jgitCommit.getAuthorIdent().getTimeZone();
-			TimeZone committerTimeZone = jgitCommit.getCommitterIdent().getTimeZone();
-
-			String msg = collectConfig.isCollectingCommitMessages() ? jgitCommit.getFullMessage().trim() : "";
-			String hash = jgitCommit.getName().toString();
-			List<String> parents = Arrays.stream(jgitCommit.getParents())
-					.map(rc -> rc.getName().toString()).collect(Collectors.toList());
-
-			GregorianCalendar authorDate = new GregorianCalendar();
-			authorDate.setTime(jgitCommit.getAuthorIdent().getWhen());
-			authorDate.setTimeZone(jgitCommit.getAuthorIdent().getTimeZone());
-
-			GregorianCalendar committerDate = new GregorianCalendar();
-			committerDate.setTime(jgitCommit.getCommitterIdent().getWhen());
-			committerDate.setTimeZone(jgitCommit.getCommitterIdent().getTimeZone());
-
-			boolean isMerge = (jgitCommit.getParentCount() > 1);
-
-			Set<String> branches = getBranches(git, hash);
-			boolean isCommitInMainBranch = branches.contains(this.mainBranchName);
-
-			/* Create one of our Commit's based on the jgitCommit metadata. */
-			Commit commit = new Commit(hash, author, committer, authorDate, authorTimeZone, committerDate, committerTimeZone, msg, parents, isMerge, branches, isCommitInMainBranch);
-
-			/* Convert each of the associated DiffEntry's to a Modification. */
-			List<DiffEntry> diffsForTheCommit = diffsForTheCommit(repo, jgitCommit);
-			if (diffsForTheCommit.size() > maxNumberFilesInACommit) {
-				String errMsg = "Commit " + id + " touches more than " + maxNumberFilesInACommit + " files";
-				log.error(errMsg);
-				throw new RepoDrillerException(errMsg);
-			}
-
-			for (DiffEntry diff : diffsForTheCommit) {
-				if (this.diffFiltersAccept(diff)) {
-					Modification m = this.diffToModification(repo, diff);
-					commit.addModification(m);
-				}
-			}
-
-			git.close();
-			return commit;
-		} catch (Exception e) {
-			e.printStackTrace();
-			throw new RuntimeException("error detailing " + id + " in " + path, e);
-		}
-	}
-
-	private Set<String> getBranches(Git git, String hash) throws GitAPIException {
-
-		if(!collectConfig.isCollectingBranches())
-			return new HashSet<>();
-
-		List<Ref> gitBranches = git.branchList().setContains(hash).call();
-		return gitBranches.stream()
-				.map(
-					  (ref) -> ref.getName().substring(ref.getName().lastIndexOf("/") + 1))
-				.collect(Collectors.toSet());
-	}
-	@Override
-	public List<Ref> getAllBranches() {
-		try (Git git = openRepository()) {
-			return git.branchList().setListMode(ListBranchCommand.ListMode.ALL).call();
-		} catch (Exception e) {
-			throw new RuntimeException("error getting branches in " + path,
-					e);
-		}
-	}
-	@Override
-	public List<Ref> getAllTags() {
-		try (Git git = openRepository()) {
-			return git.tagList().call();
-		} catch (Exception e) {
-			throw new RuntimeException("error getting tags in " + path,
-					e);
-		}
-	}
-
-	@Override
-	public void checkoutTo(String branch) throws CheckoutException {
-		try (Git git = openRepository()) {
-			if (git.getRepository().isBare()) throw new CheckoutException("error repo is bare");
-
-			if (git.getRepository().findRef(branch) == null) {
-				throw new CheckoutException("Branch does not exist: " + branch);
-			}
-
-			Status status = git.status().call();
-			if (status.hasUncommittedChanges()) {
-				throw new CheckoutException("There are uncommitted changes in the working directory");
-			}
-
-			git.checkout().setName(branch).call();
-		} catch (IOException | GitAPIException e) {
-			throw new CheckoutException("Error checking out to " + branch,
-					e);
-		}
+open class GitRepository : SCM {
+    /* Auto-determined. */
+    private var mainBranchName: String? = null
+    var maxNumberFilesInACommit: Int = -1 /* TODO Expose an API to control this value? Also in SubversionRepository. */
+        private set
+    private var maxSizeOfDiff = -1 /* TODO Expose an API to control this value? Also in SubversionRepository. */
+
+    private var collectConfig: CollectConfiguration? = null
+
+    private var repoName: String? = null
+
+    /* User-specified. */
+    private var path: String? = null
+    private var firstParentOnly = false
+    var sizeCache: Map<ObjectId, Long> = ConcurrentHashMap()
+    @JvmField
+	protected var dataBaseUtil: DataBaseUtil? = null
+    @JvmField
+	protected var projectId: Int? = null
+
+    /**
+     * Intended for sub-classes.
+     * Make sure you initialize appropriately with the Setters.
+     */
+    protected constructor() : this(null)
+
+    @JvmOverloads
+    constructor(path: String?, firstParentOnly: Boolean = false) {
+        log.debug("Creating a GitRepository from path $path")
+        setPath(path)
+        setFirstParentOnly(firstParentOnly)
+        maxNumberFilesInACommit = checkMaxNumberOfFiles()
+        maxSizeOfDiff = checkMaxSizeOfDiff()
+
+        this.collectConfig = CollectConfiguration().everything()
     }
 
-	public String getCurrentBranchOrTagName() {
-		try (Git git = openRepository()) {
-			ObjectId head = git.getRepository().resolve("HEAD");
-			return git.getRepository().getAllRefsByPeeledObjectId().get(head).stream()
-					.map(Ref::getName)
-					.distinct().filter(it -> it.startsWith("refs/")).findFirst().orElse(head.getName());
-		}  catch (Exception e) {
-			throw new RuntimeException("Error getting branch name", e);
-		}
-	}
+    constructor(path: String, firstParentOnly: Boolean, dataBaseUtil: DataBaseUtil?) {
+        log.debug("Creating a GitRepository from path $path")
+        this.dataBaseUtil = dataBaseUtil
+        val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
+        setRepoName(splitPath[splitPath.size - 1])
+        val projectId = dataBaseUtil?.getProjectId(repoName!!, path)
+        this.projectId = Objects.requireNonNullElseGet(
+            projectId
+        ) { dataBaseUtil?.insertProject(repoName!!, path) }
+        setPath(path)
+        setFirstParentOnly(firstParentOnly)
 
-	private Modification diffToModification(Repository repo, DiffEntry diff) throws IOException {
-		ModificationType change = Enum.valueOf(ModificationType.class, diff.getChangeType().toString());
+        maxNumberFilesInACommit = checkMaxNumberOfFiles()
+        maxSizeOfDiff = checkMaxSizeOfDiff()
 
-		String oldPath = diff.getOldPath();
-		String newPath = diff.getNewPath();
+        this.collectConfig = CollectConfiguration().everything()
+    }
 
-		String diffText = "";
-		String sc = "";
-		if (diff.getChangeType() != ChangeType.DELETE) {
-			diffText = getDiffText(repo, diff);
-			sc = getSourceCode(repo, diff);
-		}
+    override fun info(): SCMRepository {
+        try {
+            openRepository().use { git ->
+                RevWalk(git.repository).use { rw ->
+                    val headId: AnyObjectId = git.repository.resolve(Constants.HEAD)
+                    val root = rw.parseCommit(headId)
+                    rw.sort(RevSort.REVERSE)
+                    rw.markStart(root)
+                    val lastCommit = rw.next()
 
-		if (diffText.length() > maxSizeOfDiff) {
-			log.error("diff for " + newPath + " too big");
-			diffText = "-- TOO BIG --";
-		}
+                    val origin = git.repository.config.getString("remote", "origin", "url")
+                    return SCMRepository(this, origin, repoName, path, headId.name, lastCommit.name)
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException("Couldn't create JGit instance with path $path")
+        }
+    }
 
-		return new Modification(oldPath, newPath, change, diffText, sc);
-	}
+    val info: SCMRepository
+        get() {
+            try {
+                openRepository().use { git ->
+                    val head =
+                        git.repository.resolve(Constants.HEAD)
+                    val rw = RevWalk(git.repository)
+                    val root = rw.parseCommit(head)
+                    rw.sort(RevSort.REVERSE)
+                    rw.markStart(root)
+                    val lastCommit = rw.next()
+                    val origin = git.repository.config.getString("remote", "origin", "url")
 
-	private List<DiffEntry> diffsForTheCommit(Repository repo, RevCommit commit) throws IOException {
+                    repoName = if (origin != null) GitRemoteRepository.repoNameFromURI(origin) else repoName
+                    return SCMRepository(
+                        this,
+                        origin,
+                        repoName,
+                        path,
+                        head.name,
+                        lastCommit.name
+                    )
+                }
+            } catch (e: Exception) {
+                throw RuntimeException("Couldn't create JGit instance with path $path")
+            }
+        }
 
-		AnyObjectId currentCommit = repo.resolve(commit.getName());
-		AnyObjectId parentCommit = commit.getParentCount() > 0 ? repo.resolve(commit.getParent(0).getName()) : null;
+    @Throws(IOException::class, GitAPIException::class)
+    fun openRepository(): Git = Git.open(File(path)).also { git ->
+        this.mainBranchName = this.mainBranchName ?: discoverMainBranchName(git)
+    }
 
-		return this.getDiffBetweenCommits(repo, parentCommit, currentCommit);
-	}
+    @Throws(IOException::class)
+    private fun discoverMainBranchName(git: Git): String = git.repository.branch
 
-	@Override
-	public List<Modification> getDiffBetweenCommits(String priorCommitHash, String laterCommitHash) {
-		try (Git git = openRepository()) {
-			Repository repo = git.getRepository();
-			AnyObjectId priorCommit = repo.resolve(priorCommitHash);
-			AnyObjectId laterCommit = repo.resolve(laterCommitHash);
+    override val head: ChangeSet get() {
+        var revWalk: RevWalk? = null
+        try {
+            openRepository().use { git ->
+                val head = git.repository.resolve(Constants.HEAD)
+                revWalk = RevWalk(git.repository)
+                val r = revWalk!!.parseCommit(head)
+                git.close()
+                return ChangeSet(r.name, convertToDate(r))
+            }
+        } catch (e: Exception) {
+            throw RuntimeException("error in getHead() for $path", e)
+        } finally {
+            revWalk!!.close()
+        }
+    }
 
-			List<DiffEntry> diffs = this.getDiffBetweenCommits(repo, priorCommit, laterCommit);
-			List<Modification> modifications = diffs.stream()
-				.map(diff -> {
-						try {
-							return this.diffToModification(repo, diff);
-						} catch (IOException e) {
-							throw new RuntimeException("error diffing " + priorCommitHash + " and " + laterCommitHash + " in " + path, e);
-						}
-				})
-				.collect(Collectors.toList());
-			git.close();
-			return modifications;
-		} catch (Exception e) {
-			throw new RuntimeException("error diffing " + priorCommitHash + " and " + laterCommitHash + " in " + path,
-					e);
-		}
-	}
+    override val changeSets: List<ChangeSet> get() {
+        try {
+            openRepository().use { git ->
+                val allCs = if (!firstParentOnly) getAllCommits(git)
+                else firstParentsOnly(git)
+                git.close()
+                return allCs
+            }
+        } catch (e: Exception) {
+            throw RuntimeException("error in getChangeSets for $path", e)
+        }
+    }
 
-	private List<DiffEntry> getDiffBetweenCommits(Repository repo, AnyObjectId parentCommit,
-			AnyObjectId currentCommit) {
-		try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
+    override fun createCommit(message: String) {
+        try {
+            openRepository().use { git ->
+                val status = git.status().call()
+                if (status.hasUncommittedChanges()) {
+                    val add = git.add()
+                    for (entry in status.modified) {
+                        add.addFilepattern(entry)
+                    }
+                    add.call()
+                    git.commit().setMessage(message).call()
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException("error in create commit for $path", e)
+        }
+    }
 
-			df.setBinaryFileThreshold(2 * 1024); // 2 mb max a file
-			df.setRepository(repo);
-			df.setDiffComparator(RawTextComparator.DEFAULT);
-			df.setDetectRenames(true);
+    override fun resetLastCommitsWithMessage(message: String) {
+        try {
+            openRepository().use { git ->
+                var commit: RevCommit? = null
+                for (r in git.log().call()) {
+                    if (!r.fullMessage.contains(message)) {
+                        commit = r
+                        break
+                    }
+                }
+                if (commit != null) {
+                    git.reset().setMode(ResetCommand.ResetType.MIXED).setRef(extractChangeSet(commit).id).call()
+                } else {
+                    log.info("Reset doesn't required")
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException("Reset failed ", e)
+        }
+    }
 
-			setContext(df);
+    private fun firstParentsOnly(git: Git): List<ChangeSet> {
+        var revWalk: RevWalk? = null
+        try {
+            val allCs: MutableList<ChangeSet> = ArrayList()
 
-			List<DiffEntry> diffs = null;
-			if (parentCommit == null) {
-				try (RevWalk rw = new RevWalk(repo)) {
-					RevCommit commit = rw.parseCommit(currentCommit);
-					diffs = df.scan(new EmptyTreeIterator(),
-							new CanonicalTreeParser(null, rw.getObjectReader(), commit.getTree()));
-				}
-			} else {
-				diffs = df.scan(parentCommit, currentCommit);
-			}
-			return diffs;
-		} catch (IOException e) {
-			throw new RuntimeException(
-					"error diffing " + parentCommit.getName() + " and " + currentCommit.getName() + " in " + path, e);
-		}
-	}
+            revWalk = RevWalk(git.repository)
+            revWalk.revFilter = FirstParentFilter()
+            revWalk.sort(RevSort.TOPO)
+            val headRef = git.repository.findRef(Constants.HEAD)
+            val headCommit = revWalk.parseCommit(headRef.objectId)
+            revWalk.markStart(headCommit)
+            for (revCommit in revWalk) {
+                allCs.add(extractChangeSet(revCommit))
+            }
 
-	private void setContext(DiffFormatter df) {
-		try {
-			int context = getSystemProperty("git.diffcontext"); /* TODO: make it into a configuration */
-			df.setContext(context);
-		} catch (Exception e) {
-			return;
-		}
-	}
+            return allCs
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        } finally {
+            revWalk!!.close()
+        }
+    }
 
-	private String getSourceCode(Repository repo, DiffEntry diff) throws IOException {
+    @Throws(GitAPIException::class, IOException::class)
+    private fun getAllCommits(git: Git): List<ChangeSet> {
+        val allCs: MutableList<ChangeSet> = ArrayList()
 
-		if(!collectConfig.isCollectingSourceCode()) return "";
+        for (r in git.log().call()) {
+            allCs.add(extractChangeSet(r))
+        }
+        return allCs
+    }
 
-		try {
-			ObjectReader reader = repo.newObjectReader();
-			byte[] bytes = reader.open(diff.getNewId().toObjectId()).getBytes();
-			return new String(bytes, "utf-8");
-		} catch (Throwable e) {
-			return "";
-		}
-	}
+    private fun extractChangeSet(r: RevCommit): ChangeSet {
+        val hash = r.name
+        val date = convertToDate(r)
 
-	private String getDiffText(Repository repo, DiffEntry diff) throws IOException {
+        return ChangeSet(hash, date)
+    }
 
-		if(!collectConfig.isCollectingDiffs())
-			return "";
+    private fun convertToDate(revCommit: RevCommit): GregorianCalendar {
+        val date = GregorianCalendar()
+        date.timeZone = revCommit.authorIdent.timeZone
+        date.time = revCommit.authorIdent.getWhen()
 
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try (DiffFormatter df2 = new DiffFormatter(out)) {
-            String diffText;
-            df2.setRepository(repo);
-			df2.format(diff);
-			diffText = out.toString("UTF-8");
-			return diffText;
-		} catch (Throwable e) {
-			return "";
-		}
-	}
+        return date
+    }
 
-	public synchronized void checkout(String hash) {
-		try (Git git = openRepository()) {
-			git.reset().setMode(ResetType.HARD).call();
-			git.checkout().setName(mainBranchName).call();
-			deleteMMBranch(git);
-			git.checkout().setCreateBranch(true).setName(BRANCH_MM).setStartPoint(hash).setForced(true).setOrphan(true).call();
+    /**
+     * Get the commit with this commit id.
+     * Caveats:
+     * - If commit modifies more than maxNumberFilesInACommit, throws an exception
+     * - If one of the file diffs exceeds maxSizeOfDiff, the diffText is discarded
+     *
+     * @param id    The SHA1 hash that identifies a git commit.
+     * @returns Commit 	The corresponding Commit, or null.
+     */
+    override fun getCommit(id: String): Commit? {
+        try {
+            openRepository().use { git ->
+                /* Using JGit, this commit will be the first entry in the log beginning at id. */
+                val repo = git.repository
+                val jgitCommits = git.log().add(repo.resolve(id)).call()
+                val itr: Iterator<RevCommit> = jgitCommits.iterator()
 
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
+                if (!itr.hasNext()) return null
+                val jgitCommit = itr.next()
 
-	private synchronized void deleteMMBranch(Git git) throws GitAPIException {
-		List<Ref> refs = git.branchList().call();
-		for (Ref r : refs) {
-			if (r.getName().endsWith(BRANCH_MM)) {
-				git.branchDelete().setBranchNames(BRANCH_MM).setForce(true).call();
-				break;
-			}
-		}
-	}
+                /* Extract metadata. */
+                val author = Developer(jgitCommit.authorIdent.name, jgitCommit.authorIdent.emailAddress)
+                val committer = Developer(jgitCommit.committerIdent.name, jgitCommit.committerIdent.emailAddress)
+                val authorTimeZone = jgitCommit.authorIdent.timeZone
+                val committerTimeZone = jgitCommit.committerIdent.timeZone
 
-	public synchronized List<RepositoryFile> files() {
-		List<RepositoryFile> all = new ArrayList<>();
-		for (File f : getAllFilesInPath()) {
-			all.add(new RepositoryFile(f));
-		}
+                val msg =
+                    if (collectConfig!!.isCollectingCommitMessages) jgitCommit.fullMessage.trim { it <= ' ' } else ""
+                val hash = jgitCommit.name.toString()
+                val parents = Arrays.stream(jgitCommit.parents)
+                    .map { rc: RevCommit -> rc.name.toString() }.collect(Collectors.toList())
 
-		return all;
-	}
+                val authorDate = GregorianCalendar()
+                authorDate.time = jgitCommit.authorIdent.getWhen()
+                authorDate.timeZone = jgitCommit.authorIdent.timeZone
 
-	public synchronized void reset() {
-		try (Git git = openRepository()) {
-			git.checkout().setName(mainBranchName).setForced(true).call();
-			git.branchDelete().setBranchNames(BRANCH_MM).setForce(true).call();
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
+                val committerDate = GregorianCalendar()
+                committerDate.time = jgitCommit.committerIdent.getWhen()
+                committerDate.timeZone = jgitCommit.committerIdent.timeZone
 
-	private List<File> getAllFilesInPath() {
-		return RDFileUtils.getAllFilesInPath(path);
-	}
+                val isMerge = (jgitCommit.parentCount > 1)
 
-	@Override
-	public long totalCommits() {
-		return getChangeSets().size();
-	}
+                val branches = getBranches(git, hash)
+                val isCommitInMainBranch = branches.contains(this.mainBranchName)
 
-	@Override
-	public Map<String, CommitSize> repositoryAllSize() {
-		return repositorySize(true, null, null);
-	}
+                /* Create one of our Commit's based on the jgitCommit metadata. */
+                val commit = Commit(
+                    hash,
+                    author,
+                    committer,
+                    authorDate,
+                    authorTimeZone,
+                    committerDate,
+                    committerTimeZone,
+                    msg,
+                    parents,
+                    isMerge,
+                    branches,
+                    isCommitInMainBranch
+                )
 
-	@Override
-	public Map<String, CommitSize> currentRepositorySize() {
-		return repositorySize(null, null);
-	}
+                /* Convert each of the associated DiffEntry's to a Modification. */
+                val diffsForTheCommit = diffsForTheCommit(repo, jgitCommit)
+                if (diffsForTheCommit!!.size > maxNumberFilesInACommit) {
+                    val errMsg = "Commit $id touches more than $maxNumberFilesInACommit files"
+                    log.error(errMsg)
+                    throw RepoDrillerException(errMsg)
+                }
 
-	@Override
-	public Map<String, CommitSize> repositorySize(String filePath) {
-		return repositorySize(false, null, filePath);
-	}
+                for (diff in diffsForTheCommit) {
+                    if (this.diffFiltersAccept(diff)) {
+                        val m = this.diffToModification(repo, diff)
+                        commit.addModification(m)
+                    }
+                }
 
-	@Override
-	public Map<String, CommitSize> repositorySize(String branchOrTag, String filePath) {
-		return repositorySize(false, branchOrTag, filePath);
-	}
+                git.close()
+                return commit
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            throw RuntimeException("error detailing $id in $path", e)
+        }
+    }
 
-	private Map<String, CommitSize> repositorySize(Boolean all, String branchOrTag, String filePath) {
-			filePath = Objects.equals(filePath, path) ? "" : filePath;
-			String localPath = filePath != null && filePath.startsWith(path) ? filePath.substring(path.length() + 1).replace("\\", "/") : "";
-        return dataBaseUtil.getCommitSizeMap(projectId, localPath);
-	}
+    @Throws(GitAPIException::class)
+    private fun getBranches(git: Git, hash: String): Set<String?> {
+        if (!collectConfig!!.isCollectingBranches) return HashSet()
 
-	@Override
-	@Deprecated
-	public String blame(String file, String commitToBeBlamed, Integer line) {
-		return blame(file, commitToBeBlamed).get(line).getCommit();
-	}
+        val gitBranches = git.branchList().setContains(hash).call()
+        return gitBranches.stream()
+            .map { ref: Ref -> ref.name.substring(ref.name.lastIndexOf("/") + 1) }
+            .collect(Collectors.toSet())
+    }
 
-	public List<BlamedLine> blame(String file, String commitToBeBlamed) {
-		return blame(file, commitToBeBlamed, true);
-	}
+    override val allBranches: List<Ref> get() {
+        try {
+            openRepository().use { git ->
+                return git.branchList().setListMode(ListBranchCommand.ListMode.ALL).call()
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(
+                "error getting branches in $path",
+                e
+            )
+        }
+    }
 
-	public List<BlamedLine> blame(String file) {
-		try (Git git = openRepository()) {
-			BlameResult blameResult = git.blame().setFilePath(file.replace("\\", "/")).setFollowFileRenames(true).call();
-			if (blameResult != null) {
-				int rows = blameResult.getResultContents().size();
-				List<BlamedLine> result = new ArrayList<>();
-				for (int i = 0; i < rows; i++) {
-					result.add(new BlamedLine(i,
-							blameResult.getResultContents().getString(i),
-							blameResult.getSourceAuthor(i).getName(),
-							blameResult.getSourceCommitter(i).getName(),
-							blameResult.getSourceCommit(i).getId().getName()));
-				}
+    override val allTags: List<Ref> get() {
+        try {
+            openRepository().use { git ->
+                return git.tagList().call()
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(
+                "error getting tags in $path",
+                e
+            )
+        }
+    }
 
-				return result;
-			} else {
-				// TODO create notification
-				System.out.println("BlameResult not found. File: " + file);
-				return new ArrayList<>();
-//				throw new RuntimeException("BlameResult not found. File: " + file);
-			}
+    @Throws(CheckoutException::class)
+    override fun checkoutTo(branch: String) {
+        try {
+            openRepository().use { git ->
+                if (git.repository.isBare) throw CheckoutException("error repo is bare")
+                if (git.repository.findRef(branch) == null) {
+                    throw CheckoutException("Branch does not exist: $branch")
+                }
 
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
+                val status = git.status().call()
+                if (status.hasUncommittedChanges()) {
+                    throw CheckoutException("There are uncommitted changes in the working directory")
+                }
+                git.checkout().setName(branch).call()
+            }
+        } catch (e: IOException) {
+            throw CheckoutException(
+                "Error checking out to $branch",
+                e
+            )
+        } catch (e: GitAPIException) {
+            throw CheckoutException(
+                "Error checking out to $branch",
+                e
+            )
+        }
+    }
 
-	@Override
-	public BlameManager blameManager() {
-		try (Git git = openRepository()) {
-			Map<String, BlameFileInfo> fileMap = new HashMap<>();
+    override val currentBranchOrTagName: String
+        get() {
+            try {
+                openRepository().use { git ->
+                    val head = git.repository.resolve("HEAD")
+                    return git.repository.allRefsByPeeledObjectId[head]!!.stream()
+                        .map { obj: Ref -> obj.name }
+                        .distinct().filter { it: String -> it.startsWith("refs/") }.findFirst().orElse(head.name)
+                }
+            } catch (e: Exception) {
+                throw RuntimeException("Error getting branch name", e)
+            }
+    }
 
-			for (RepositoryFile file : files()) {
-				String localFilePath = file.getFile().getPath().substring(path.length() + 1).replace("\\", "/");
-				BlameResult blameResult = git.blame().setFilePath(localFilePath).setFollowFileRenames(true).call();
+    @Throws(IOException::class)
+    private fun diffToModification(repo: Repository, diff: DiffEntry): Modification {
+        val change = enumValueOf<ModificationType>(diff.changeType.toString())
 
-				if (blameResult != null) {
-					int rows = blameResult.getResultContents().size();
-					for (int i = 0; i < rows; i++) {
-						String author = blameResult.getSourceAuthor(i).getName();
-						String fileName = blameResult.getSourcePath(i);
-						RevCommit commit = blameResult.getSourceCommit(i);
-						BlameAuthorInfo blameAuthorInfo = new BlameAuthorInfo(author, Collections.singleton(commit), 1, blameResult.getResultContents().getString(i).getBytes().length);
-						fileMap.computeIfAbsent(blameResult.getSourcePath(i), k -> new BlameFileInfo(fileName)).add(blameAuthorInfo);
-					}
-				} else {
-					// TODO create notification
-					System.out.println("BlameResult not found. File: " + file + " localFilePath: " + localFilePath);
-					//	throw new RuntimeException("BlameResult not found. File: " + file + " localFilePath: " + localFilePath);
-				}
-			}
-			return new BlameManager(fileMap, repoName);
+        val oldPath = diff.oldPath
+        val newPath = diff.newPath
 
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
+        var diffText = ""
+        var sc = ""
+        if (diff.changeType != DiffEntry.ChangeType.DELETE) {
+            diffText = getDiffText(repo, diff)
+            sc = getSourceCode(repo, diff)
+        }
 
-	public List<BlamedLine> blame(String file, String commitToBeBlamed, boolean priorCommit) {
-		try (Git git = openRepository()) {
-			ObjectId gitCommitToBeBlamed;
-			if (priorCommit) {
-				Iterable<RevCommit> commits = git.log().add(git.getRepository().resolve(commitToBeBlamed)).call();
-				gitCommitToBeBlamed = commits.iterator().next().getParent(0).getId();
-			} else {
-				gitCommitToBeBlamed = git.getRepository().resolve(commitToBeBlamed);
-			}
+        if (diffText.length > maxSizeOfDiff) {
+            log.error("diff for $newPath too big")
+            diffText = "-- TOO BIG --"
+        }
 
-			BlameResult blameResult = git.blame().setFilePath(file.replace("\\", "/")).setStartCommit(gitCommitToBeBlamed).setFollowFileRenames(true).call();
-			if (blameResult != null) {
-				int rows = blameResult.getResultContents().size();
-				List<BlamedLine> result = new ArrayList<>();
-				for (int i = 0; i < rows; i++) {
-					result.add(new BlamedLine(i,
-							blameResult.getResultContents().getString(i),
-							blameResult.getSourceAuthor(i).getName(),
-							blameResult.getSourceCommitter(i).getName(),
-							blameResult.getSourceCommit(i).getId().getName()));
-				}
+        return Modification(oldPath, newPath, change, diffText, sc)
+    }
 
-				return result;
-			} else {
-				// TODO create notification
-				System.out.println("BlameResult not found. File: " + file);
-				return new ArrayList<>();
-			}
+    @Throws(IOException::class)
+    private fun diffsForTheCommit(repo: Repository, commit: RevCommit): List<DiffEntry>? {
+        val currentCommit: AnyObjectId = repo.resolve(commit.name)
+        val parentCommit: AnyObjectId? = if (commit.parentCount > 0) repo.resolve(commit.getParent(0).name) else null
 
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
+        return this.getDiffBetweenCommits(repo, parentCommit, currentCommit)
+    }
 
-	public Map<String, DeveloperInfo> getDeveloperInfo() throws IOException, GitAPIException {
-		return getDeveloperInfo(null);
-	}
+    override fun getDiffBetweenCommits(priorCommitHash: String, laterCommitHash: String): List<Modification> {
+        try {
+            openRepository().use { git ->
+                val repo = git.repository
+                val priorCommit: AnyObjectId = repo.resolve(priorCommitHash)
+                val laterCommit: AnyObjectId = repo.resolve(laterCommitHash)
 
-	public void dbPrepared() {
-		developersMap.clear();
-		ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-		List<Future<?>> futures = new ArrayList<>();
-		try (Git git = openRepository()) {
+                val diffs = this.getDiffBetweenCommits(repo, priorCommit, laterCommit)
+                val modifications = diffs!!.stream()
+                    .map { diff: DiffEntry ->
+                        try {
+                            return@map this.diffToModification(repo, diff)
+                        } catch (e: IOException) {
+                            throw RuntimeException("error diffing $priorCommitHash and $laterCommitHash in $path", e)
+                        }
+                    }
+                    .collect(Collectors.toList())
+                git.close()
+                return modifications
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(
+                "error diffing $priorCommitHash and $laterCommitHash in $path",
+                e
+            )
+        }
+    }
 
-			List<RevCommit> commits = StreamSupport.stream(git.log().call().spliterator(), true)
-					.filter(commit -> !dataBaseUtil.isCommitExist(commit.getName()))
-					.toList();
+    private fun getDiffBetweenCommits(
+        repo: Repository, parentCommit: AnyObjectId?,
+        currentCommit: AnyObjectId
+    ): List<DiffEntry>? {
+        try {
+            DiffFormatter(DisabledOutputStream.INSTANCE).use { df ->
+                df.setBinaryFileThreshold(2 * 1024) // 2 mb max a file
+                df.setRepository(repo)
+                df.setDiffComparator(RawTextComparator.DEFAULT)
+                df.isDetectRenames = true
 
-			ConcurrentHashMap<String, Long> authorIdCache = new ConcurrentHashMap<>();
+                setContext(df)
 
-			for (int i = 0; i < commits.size(); i++) {
-				final RevCommit commit = commits.get(i);
+                var diffs: List<DiffEntry>? = null
+                if (parentCommit == null) {
+                    RevWalk(repo).use { rw ->
+                        val commit = rw.parseCommit(currentCommit)
+                        diffs = df.scan(
+                            EmptyTreeIterator(),
+                            CanonicalTreeParser(null, rw.objectReader, commit.tree)
+                        )
+                    }
+                } else {
+                    diffs = df.scan(parentCommit, currentCommit)
+                }
+                return diffs
+            }
+        } catch (e: IOException) {
+            throw RuntimeException(
+                "error diffing " + parentCommit!!.name + " and " + currentCommit.name + " in " + path, e
+            )
+        }
+    }
 
-				Future<?> future = executor.submit(() -> {
-					try {
-						DataBaseUtil dataBaseUtil1 = new DataBaseUtil(dataBaseUtil.getUrl());
-						List<FileEntity> fileList = new ArrayList<>();
-						PersonIdent author = commit.getAuthorIdent();
-						Long authorId = authorIdCache.computeIfAbsent(author.getEmailAddress(), e -> {
-							Long id = dataBaseUtil.getAuthorId(projectId, e);
-							return id != null ? id : dataBaseUtil1.insertAuthor(projectId, author.getName(), e);
-						});
-						Map<String, org.tera201.vcsmanager.util.FileEntity> paths = GitRepositoryUtil.getCommitsFiles(commit, git);
-						paths.keySet().forEach(it -> filePathMap.computeIfAbsent(it, k -> {
-							Long id = dataBaseUtil.getFilePathId(projectId, k);
-							return id != null ? id : dataBaseUtil1.insertFilePath(projectId, k);
-						}));
-						double commitStability = CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit));
-						long commitSize = GitRepositoryUtil.processCommitSize(commit, git);
-						org.tera201.vcsmanager.util.FileEntity fileMergedEntity = paths.values().stream().reduce(new org.tera201.vcsmanager.util.FileEntity(0, 0, 0, 0, 0, 0, 0, 0), (acc, fileEntity) -> {
-							acc.add(fileEntity);
-							return acc;
-						});
-						dataBaseUtil1.insertCommit(projectId, authorId, commit.getName(), commit.getCommitTime(), commitSize, commitStability, fileMergedEntity);
-						paths.keySet().forEach(it -> fileList.add(new FileEntity(projectId, it, filePathMap.get(it), commit.getName(), commit.getCommitTime())));
-						dataBaseUtil1.insertFile(fileList);
-						dataBaseUtil1.closeConnection();
-					} catch (Exception e) {
-						System.err.println("Error processing commit " + commit.getName() + ": " + e.getMessage());
-					}
-				});
-				futures.add(future);
-			}
+    private fun setContext(df: DiffFormatter) {
+        try {
+            val context = getSystemProperty("git.diffcontext") /* TODO: make it into a configuration */
+            df.setContext(context)
+        } catch (e: Exception) {
+            return
+        }
+    }
 
-			for (Future<?> f : futures) {
-				f.get();
-			}
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		} finally {
-			executor.shutdown();
-		}
-	}
+    @Throws(IOException::class)
+    private fun getSourceCode(repo: Repository, diff: DiffEntry): String {
+        if (!collectConfig!!.isCollectingSourceCode) return ""
 
-	public Map<String, DeveloperInfo> getDeveloperInfo(String nodePath) throws IOException, GitAPIException {
-		try (Git git = openRepository()) {
+        try {
+            val reader = repo.newObjectReader()
+            val bytes = reader.open(diff.newId.toObjectId()).bytes
+            return String(bytes, charset("utf-8"))
+        } catch (e: Throwable) {
+            return ""
+        }
+    }
 
-			nodePath = Objects.equals(nodePath, path) ? null : nodePath;
-			String localPath = nodePath != null && nodePath.startsWith(path) ? nodePath.substring(path.length() + 1).replace("\\", "/") : nodePath;
-			Iterable<RevCommit> commits = localPath != null ? git.log().addPath(localPath).call() : git.log().call();
-			ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-			List<Future<?>> futures = new ArrayList<>();
+    @Throws(IOException::class)
+    private fun getDiffText(repo: Repository, diff: DiffEntry): String {
+        if (!collectConfig!!.isCollectingDiffs) return ""
 
-			for (RevCommit commit : commits) {
-				// Submitting tasks to the thread pool
-				Future<?> future = executorService.submit(() -> {
-					DataBaseUtil dataBaseUtil1 = new DataBaseUtil(dataBaseUtil.getUrl());
-					CommitEntity commitEntity = dataBaseUtil1.getCommit(projectId, commit.getName());
-					DeveloperInfo dev = developersMap.computeIfAbsent(commitEntity.getAuthorEmail(), k -> new DeveloperInfo(commitEntity, commit));
-					dev.updateByCommit(commitEntity, commit);
-					dataBaseUtil1.closeConnection();
-				});
-				futures.add(future);
-			}
+        val out = ByteArrayOutputStream()
+        try {
+            DiffFormatter(out).use { df2 ->
+                df2.setRepository(repo)
+                df2.format(diff)
+                val diffText = out.toString("UTF-8")
+                return diffText
+            }
+        } catch (e: Throwable) {
+            return ""
+        }
+    }
 
-			for (Future<?> future : futures) {
-				try {
-					future.get();  // Catch exceptions if they occur during task execution
-				} catch (InterruptedException | ExecutionException e) {
-					e.printStackTrace();  // Logging or other error handling
-				}
-			}
+    @Synchronized
+    override fun checkout(hash: String) {
+        try {
+            openRepository().use { git ->
+                git.reset().setMode(ResetCommand.ResetType.HARD).call()
+                git.checkout().setName(mainBranchName).call()
+                deleteMMBranch(git)
+                git.checkout().setCreateBranch(true).setName(BRANCH_MM).setStartPoint(hash).setForced(true)
+                    .setOrphan(true).call()
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        }
+    }
 
-			futures.clear();
+    @Synchronized
+    @Throws(GitAPIException::class)
+    private fun deleteMMBranch(git: Git) {
+        val refs = git.branchList().call()
+        for (r in refs) {
+            if (r.name.endsWith(BRANCH_MM)) {
+                git.branchDelete().setBranchNames(BRANCH_MM).setForce(true).call()
+                break
+            }
+        }
+    }
 
-			ObjectId head = git.getRepository().resolve(Constants.HEAD);
-			String finalNodePath = nodePath;
-			Stream<String> fileStream = files().stream().parallel().filter(it -> ((finalNodePath == null || it.getFile().getPath().startsWith(finalNodePath)) && !it.getFile().getPath().endsWith(".DS_Store")))
-					.map(it -> it.getFile().getPath().substring(path.length() + 1).replace("\\", "/")).filter(filePathMap.keySet()::contains);
-			Stream<Pair<String, String>> fileHashes = fileStream.map(it -> new Pair<>(it, head.getName())).filter(it -> dataBaseUtil.getBlameFileId(projectId, filePathMap.get(it.getFirst()), it.getSecond()) == null);
-			Stream<Pair<String, Integer>> fileAndBlameHashes = fileHashes.map(it -> new Pair<>(it.getFirst(), dataBaseUtil.insertBlameFile(projectId, filePathMap.get(it.getFirst()), it.getSecond())));
-			Map<String, String> devs = dataBaseUtil.getDevelopersByProjectId(projectId);
+    @Synchronized
+    override fun files(): List<RepositoryFile> {
+        val all: MutableList<RepositoryFile> = ArrayList()
+        for (f in allFilesInPath) {
+            all.add(RepositoryFile(f))
+        }
 
-			for (Pair<String, Integer> filePair : fileAndBlameHashes.collect(Collectors.toSet())) {
-				Future<?> future = executorService.submit(() -> {
-					DataBaseUtil dataBaseUtil1 = new DataBaseUtil(dataBaseUtil.getUrl());
-                    BlameResult blameResult;
+        return all
+    }
+
+    @Synchronized
+    override fun reset() {
+        try {
+            openRepository().use { git ->
+                git.checkout().setName(mainBranchName).setForced(true).call()
+                git.branchDelete().setBranchNames(BRANCH_MM).setForce(true).call()
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        }
+    }
+
+    private val allFilesInPath: List<File>
+        get() = RDFileUtils.getAllFilesInPath(path)
+
+    override fun totalCommits(): Long {
+        return changeSets.size.toLong()
+    }
+
+    override fun repositoryAllSize(): Map<String, CommitSize> {
+        return repositorySize(true, null, null)
+    }
+
+    override fun repositorySize(filePath: String): Map<String, CommitSize> {
+        return repositorySize(false, null, filePath)
+    }
+
+    override fun repositorySize(branchOrTag: String, filePath: String): Map<String, CommitSize> {
+        return repositorySize(false, branchOrTag, filePath)
+    }
+
+    private fun repositorySize(all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> {
+        var filePath = filePath
+        filePath = if (filePath == path) "" else filePath
+        val localPath = if (filePath != null && filePath.startsWith(path!!)) filePath.substring(path!!.length + 1)
+            .replace("\\", "/") else ""
+        return dataBaseUtil!!.getCommitSizeMap(projectId!!, localPath)
+    }
+
+    fun blame(file: String, commitToBeBlamed: String): List<BlamedLine> {
+        return blame(file, commitToBeBlamed, true)
+    }
+
+    override fun blame(file: String): List<BlamedLine> {
+        try {
+            openRepository().use { git ->
+                val blameResult = git.blame().setFilePath(file.replace("\\", "/")).setFollowFileRenames(true).call()
+                if (blameResult != null) {
+                    val rows = blameResult.resultContents.size()
+                    val result: MutableList<BlamedLine> = ArrayList()
+                    for (i in 0..<rows) {
+                        result.add(
+                            BlamedLine(
+                                i,
+                                blameResult.resultContents.getString(i),
+                                blameResult.getSourceAuthor(i).name,
+                                blameResult.getSourceCommitter(i).name,
+                                blameResult.getSourceCommit(i).id.name
+                            )
+                        )
+                    }
+
+                    return result
+                } else {
+                    // TODO create notification
+                    println("BlameResult not found. File: $file")
+                    return ArrayList()
+                    //				throw new RuntimeException("BlameResult not found. File: " + file);
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        }
+    }
+
+    override fun blameManager(): BlameManager {
+        try {
+            openRepository().use { git ->
+                val fileMap: MutableMap<String, BlameFileInfo> = HashMap()
+                for (file in files()) {
+                    val localFilePath = file.file.path.substring(path!!.length + 1).replace("\\", "/")
+                    val blameResult = git.blame().setFilePath(localFilePath).setFollowFileRenames(true).call()
+
+                    if (blameResult != null) {
+                        val rows = blameResult.resultContents.size()
+                        for (i in 0..<rows) {
+                            val author = blameResult.getSourceAuthor(i).name
+                            val fileName = blameResult.getSourcePath(i)
+                            val commit = blameResult.getSourceCommit(i)
+                            val blameAuthorInfo = BlameAuthorInfo(
+                                author,
+                                setOf(commit),
+                                1,
+                                blameResult.resultContents.getString(i).toByteArray().size.toLong()
+                            )
+                            fileMap.computeIfAbsent(blameResult.getSourcePath(i)) { k: String? -> BlameFileInfo(fileName) }
+                                .add(blameAuthorInfo)
+                        }
+                    } else {
+                        // TODO create notification
+                        println("BlameResult not found. File: $file localFilePath: $localFilePath")
+                        //	throw new RuntimeException("BlameResult not found. File: " + file + " localFilePath: " + localFilePath);
+                    }
+                }
+                return BlameManager(fileMap, repoName)
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        }
+    }
+
+    override fun blame(file: String, commitToBeBlamed: String, priorCommit: Boolean): List<BlamedLine> {
+        try {
+            openRepository().use { git ->
+                val gitCommitToBeBlamed: ObjectId
+                if (priorCommit) {
+                    val commits = git.log().add(git.repository.resolve(commitToBeBlamed)).call()
+                    gitCommitToBeBlamed = commits.iterator().next().getParent(0).id
+                } else {
+                    gitCommitToBeBlamed = git.repository.resolve(commitToBeBlamed)
+                }
+
+                val blameResult = git.blame().setFilePath(file.replace("\\", "/")).setStartCommit(gitCommitToBeBlamed)
+                    .setFollowFileRenames(true).call()
+                if (blameResult != null) {
+                    val rows = blameResult.resultContents.size()
+                    val result: MutableList<BlamedLine> = ArrayList()
+                    for (i in 0..<rows) {
+                        result.add(
+                            BlamedLine(
+                                i,
+                                blameResult.resultContents.getString(i),
+                                blameResult.getSourceAuthor(i).name,
+                                blameResult.getSourceCommitter(i).name,
+                                blameResult.getSourceCommit(i).id.name
+                            )
+                        )
+                    }
+
+                    return result
+                } else {
+                    // TODO create notification
+                    println("BlameResult not found. File: $file")
+                    return ArrayList()
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        }
+    }
+
+    @get:Throws(IOException::class, GitAPIException::class)
+    override val developerInfo = getDeveloperInfo(null)
+
+    override fun dbPrepared() {
+        developersMap.clear()
+        val executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+        val futures: MutableList<Future<*>> = ArrayList()
+        try {
+            openRepository().use { git ->
+                val commits = StreamSupport.stream(git.log().call().spliterator(), true)
+                    .filter { commit: RevCommit -> !dataBaseUtil!!.isCommitExist(commit.name) }
+                    .toList()
+                val authorIdCache = ConcurrentHashMap<String, Long>()
+
+                for (i in commits.indices) {
+                    val commit = commits[i]
+
+                    val future = executor.submit {
+                        try {
+                            val dataBaseUtil1 = DataBaseUtil(dataBaseUtil!!.url)
+                            val fileList: MutableList<org.tera201.vcsmanager.scm.entities.FileEntity> =
+                                ArrayList()
+                            val author = commit.authorIdent
+                            val authorId = authorIdCache.computeIfAbsent(author.emailAddress) { e: String? ->
+                                val id = dataBaseUtil!!.getAuthorId(projectId!!, e!!)
+                                id ?: dataBaseUtil1.insertAuthor(projectId!!, author.name, e)!!
+                            }
+                            val paths = GitRepositoryUtil.getCommitsFiles(commit, git)
+                            paths.keys.forEach(Consumer { it: String ->
+                                filePathMap.computeIfAbsent(it) { k: String? ->
+                                    val id = dataBaseUtil!!.getFilePathId(projectId!!, k!!)
+                                    id ?: dataBaseUtil1.insertFilePath(projectId!!, k)!!
+                                }
+                            })
+                            val commitStability =
+                                CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit))
+                            val commitSize = GitRepositoryUtil.processCommitSize(commit, git)
+                            val fileMergedEntity = paths.values.stream().reduce(
+                                FileEntity()
+                            ) { acc: FileEntity, fileEntity: FileEntity? ->
+                                acc.add(
+                                    fileEntity!!
+                                )
+                                acc
+                            }
+                            dataBaseUtil1.insertCommit(
+                                projectId!!,
+                                authorId,
+                                commit.name,
+                                commit.commitTime,
+                                commitSize,
+                                commitStability,
+                                fileMergedEntity
+                            )
+                            paths.keys.forEach(Consumer { it: String ->
+                                fileList.add(
+                                    org.tera201.vcsmanager.scm.entities.FileEntity(
+                                        projectId!!,
+                                        it,
+                                        filePathMap[it],
+                                        commit.name,
+                                        commit.commitTime
+                                    )
+                                )
+                            })
+                            dataBaseUtil1.insertFile(fileList)
+                            dataBaseUtil1.closeConnection()
+                        } catch (e: Exception) {
+                            System.err.println("Error processing commit " + commit.name + ": " + e.message)
+                        }
+                    }
+                    futures.add(future)
+                }
+                for (f in futures) {
+                    f.get()
+                }
+            }
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        } finally {
+            executor.shutdown()
+        }
+    }
+
+    @Throws(IOException::class, GitAPIException::class)
+    override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> {
+        var nodePath = nodePath
+        openRepository().use { git ->
+            nodePath = if (nodePath == path) null else nodePath
+            val localPath =
+                if (nodePath != null && nodePath!!.startsWith(path!!)) nodePath!!.substring(path!!.length + 1)
+                    .replace("\\", "/") else nodePath
+            val commits = if (localPath != null) git.log().addPath(localPath).call() else git.log().call()
+            val executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+            val futures: MutableList<Future<*>> = ArrayList()
+
+            for (commit in commits) {
+                // Submitting tasks to the thread pool
+                val future = executorService.submit {
+                    val dataBaseUtil1 = DataBaseUtil(dataBaseUtil!!.url)
+                    val commitEntity = dataBaseUtil1.getCommit(projectId!!, commit.name)
+                    val dev =
+                        developersMap.computeIfAbsent(commitEntity!!.authorEmail) { k: String? ->
+                            DeveloperInfo(
+                                commitEntity,
+                                commit
+                            )
+                        }
+                    dev.updateByCommit(commitEntity, commit)
+                    dataBaseUtil1.closeConnection()
+                }
+                futures.add(future)
+            }
+
+            for (future in futures) {
+                try {
+                    future.get() // Catch exceptions if they occur during task execution
+                } catch (e: InterruptedException) {
+                    e.printStackTrace() // Logging or other error handling
+                } catch (e: ExecutionException) {
+                    e.printStackTrace()
+                }
+            }
+
+            futures.clear()
+
+            val head = git.repository.resolve(Constants.HEAD)
+            val finalNodePath = nodePath
+            val fileStream = files().stream().parallel().filter { it: RepositoryFile ->
+                ((finalNodePath == null || it.file.path.startsWith(finalNodePath)) && !it.file.path.endsWith(".DS_Store"))
+            }
+                .map { it: RepositoryFile -> it.file.path.substring(path!!.length + 1).replace("\\", "/") }
+                .filter { o: String -> filePathMap.keys.contains(o) }
+            val fileHashes = fileStream.map { it: String -> Pair(it, head.name) }.filter { it: Pair<String, String?> ->
+                dataBaseUtil!!.getBlameFileId(
+                    projectId!!, filePathMap[it.first]!!, it.second!!
+                ) == null
+            }
+            val fileAndBlameHashes = fileHashes.map { it: Pair<String, String?> ->
+                Pair(
+                    it.first, dataBaseUtil!!.insertBlameFile(
+                        projectId!!, filePathMap[it.first]!!, it.second!!
+                    )
+                )
+            }
+            val devs = dataBaseUtil!!.getDevelopersByProjectId(
+                projectId!!
+            )
+
+            for ((first, second) in fileAndBlameHashes.collect(Collectors.toSet<Pair<String, Int>>())) {
+                val future = executorService.submit {
+                    val dataBaseUtil1 = DataBaseUtil(dataBaseUtil!!.url)
+                    val blameResult: BlameResult?
                     try {
-                        blameResult = git.blame().setFilePath(filePair.getFirst()).setStartCommit(head).call();
-                    } catch (GitAPIException e) {
-                        throw new RuntimeException(e);
+                        blameResult = git.blame().setFilePath(first).setStartCommit(head).call()
+                    } catch (e: GitAPIException) {
+                        throw RuntimeException(e)
                     }
                     if (blameResult != null) {
-						GitRepositoryUtil.updateFileOwnerBasedOnBlame(blameResult, devs, dataBaseUtil1, projectId, filePair.getSecond(), head.getName());
-						dataBaseUtil1.updateBlameFileSize(filePair.getSecond());
-						dataBaseUtil1.closeConnection();
-					}
-                });
-				futures.add(future);
-			}
-			for (Future<?> future : futures) {
-				try {
-					future.get();  // Catch exceptions if they occur during task execution
-				} catch (InterruptedException | ExecutionException e) {
-					e.printStackTrace();  // Logging or other error handling
-				}
-			}
-			dataBaseUtil.developerUpdateByBlameInfo(projectId, developersMap);
-			executorService.shutdown();
-		}
-        return developersMap;
-	}
+                        GitRepositoryUtil.updateFileOwnerBasedOnBlame(
+                            blameResult,
+                            devs,
+                            dataBaseUtil1,
+                            projectId,
+                            second,
+                            head.name
+                        )
+                        dataBaseUtil1.updateBlameFileSize(second)
+                        dataBaseUtil1.closeConnection()
+                    }
+                }
+                futures.add(future)
+            }
+            for (future in futures) {
+                try {
+                    future.get() // Catch exceptions if they occur during task execution
+                } catch (e: InterruptedException) {
+                    e.printStackTrace() // Logging or other error handling
+                } catch (e: ExecutionException) {
+                    e.printStackTrace()
+                }
+            }
+            dataBaseUtil!!.developerUpdateByBlameInfo(projectId!!, developersMap)
+            executorService.shutdown()
+        }
+        return developersMap
+    }
 
-	private void processDeveloperInfo(RevCommit commit, Git git, ConcurrentHashMap<String, DeveloperInfo> developers) {
-		try {
-			String email = commit.getAuthorIdent().getEmailAddress();
-			DeveloperInfo dev = developers.computeIfAbsent(email, k -> new DeveloperInfo(commit.getAuthorIdent().getName(), email));
-			dev.addCommit(commit);
-			GitRepositoryUtil.analyzeCommit(commit, git, dev);
-		} catch (IOException ignored) {}
-	}
+    private fun processDeveloperInfo(
+        commit: RevCommit,
+        git: Git,
+        developers: ConcurrentHashMap<String, DeveloperInfo>
+    ) {
+        try {
+            val email = commit.authorIdent.emailAddress
+            val dev = developers.computeIfAbsent(email) { k: String? -> DeveloperInfo(commit.authorIdent.name, email) }
+            dev.addCommit(commit)
+            GitRepositoryUtil.analyzeCommit(commit, git, dev)
+        } catch (ignored: IOException) {
+        }
+    }
 
-	public Integer getMaxNumberFilesInACommit() {
-		return maxNumberFilesInACommit;
-	}
+    override fun getCommitFromTag(tag: String): String {
+        try {
+            openRepository().use { git ->
+                val repo = git.repository
+                val commits = git.log().add(getActualRefObjectId(repo.findRef(tag), repo)).call()
+                git.close()
+                for (commit in commits) {
+                    return commit.name.toString()
+                }
 
-	@Override
-	public String getCommitFromTag(String tag) {
+                throw RuntimeException("Failed for tag $tag") // we never arrive here, hopefully
+            }
+        } catch (e: Exception) {
+            throw RuntimeException("Failed for tag $tag", e)
+        }
+    }
 
-		try (Git git = openRepository()) {
-			Repository repo = git.getRepository();
+    @Throws(IOException::class)
+    private fun getActualRefObjectId(ref: Ref, repo: Repository): ObjectId {
+        val repoPeeled = repo.refDatabase.peel(ref)
+        if (repoPeeled.peeledObjectId != null) {
+            return repoPeeled.peeledObjectId
+        }
+        return ref.objectId
+    }
 
-			Iterable<RevCommit> commits = git.log().add(getActualRefObjectId(repo.findRef(tag), repo)).call();
-			git.close();
-			for (RevCommit commit : commits) {
-				return commit.getName().toString();
-			}
+    /**
+     * Return the max number of files in a commit.
+     * Default is hard-coded to "something large".
+     * Override with environment variable "git.maxfiles".
+     *
+     * @return Max number of files in a commit
+     */
+    private fun checkMaxNumberOfFiles(): Int {
+        return try {
+            getSystemProperty("git.maxfiles")
+        } catch (e: Exception) {
+            DEFAULT_MAX_NUMBER_OF_FILES_IN_A_COMMIT
+        }
+    }
 
-			throw new RuntimeException("Failed for tag " + tag); // we never arrive here, hopefully
+    /**
+     * Return the max size of a diff in bytes.
+     * Default is hard-coded to "something large".
+     * Override with environment variable "git.maxdiff".
+     *
+     * @return Max diff size
+     */
+    private fun checkMaxSizeOfDiff(): Int {
+        return try {
+            getSystemProperty("git.maxdiff")
+        } catch (e: Exception) {
+            MAX_SIZE_OF_A_DIFF
+        }
+    }
 
-		} catch (Exception e) {
-			throw new RuntimeException("Failed for tag " + tag, e);
-		}
-	}
+    /**
+     * Get this system property (environment variable)'s value as an integer.
+     *
+     * @param name    Environment variable to retrieve
+     * @return    `name` successfully parsed as an int
+     * @throws NumberFormatException
+     */
+    @Throws(NumberFormatException::class)
+    private fun getSystemProperty(name: String): Int {
+        val `val` = System.getProperty(name)
+        return `val`.toInt()
+    }
 
-	private ObjectId getActualRefObjectId(Ref ref, Repository repo) throws IOException {
-		final Ref repoPeeled = repo.getRefDatabase().peel(ref);
-		if (repoPeeled.getPeeledObjectId() != null) {
-			return repoPeeled.getPeeledObjectId();
-		}
-		return ref.getObjectId();
-	}
+    fun setRepoName(repoName: String?) {
+        this.repoName = repoName
+    }
 
-	/**
-	 * Return the max number of files in a commit.
-	 * Default is hard-coded to "something large".
-	 * Override with environment variable "git.maxfiles".
-	 *
-	 * @return Max number of files in a commit
-	 */
-	private int checkMaxNumberOfFiles() {
-		try {
-			return getSystemProperty("git.maxfiles");
-		} catch (Exception e) {
-			return DEFAULT_MAX_NUMBER_OF_FILES_IN_A_COMMIT;
-		}
-	}
+    fun setPath(path: String?) {
+        this.path = PathUtils.fullPath(path)
+    }
 
-	/**
-	 * Return the max size of a diff in bytes.
-	 * Default is hard-coded to "something large".
-	 * Override with environment variable "git.maxdiff".
-	 *
-	 * @return Max diff size
-	 */
-	private int checkMaxSizeOfDiff() {
-		try {
-			return getSystemProperty("git.maxdiff");
-		} catch (Exception e) {
-			return MAX_SIZE_OF_A_DIFF;
-		}
-	}
+    fun setFirstParentOnly(firstParentOnly: Boolean) {
+        this.firstParentOnly = firstParentOnly
+    }
 
-	/**
-	 * Get this system property (environment variable)'s value as an integer.
-	 *
-	 * @param name	Environment variable to retrieve
-	 * @return	{@code name} successfully parsed as an int
-	 * @throws NumberFormatException
-	 */
-	private int getSystemProperty(String name) throws NumberFormatException {
-		String val = System.getProperty(name);
-		return Integer.parseInt(val);
-	}
+    override fun clone(dest: Path): SCM {
+        log.info("Cloning to $dest")
+        RDFileUtils.copyDirTree(Paths.get(path), dest)
+        return GitRepository(dest.toString())
+    }
 
-	public void setRepoName(String repoName) {
-		this.repoName = repoName;
-	}
+    override fun delete() {
+        // allow to be destroyed more than once
+        if (RDFileUtils.exists(Paths.get(path))) {
+            log.info("Deleting: $path")
+            try {
+                FileUtils.deleteDirectory(File(path.toString()))
+            } catch (e: IOException) {
+                log.info("Delete failed: $e")
+            }
+        }
+    }
 
-	public void setPath(String path) {
-		this.path = PathUtils.fullPath(path);
-	}
+    override fun setDataToCollect(config: CollectConfiguration) {
+        this.collectConfig = config
+    }
 
-	public void setFirstParentOnly(boolean firstParentOnly) {
-		this.firstParentOnly = firstParentOnly;
-	}
+    /**
+     * True if all filters accept, else false.
+     *
+     * @param diff    DiffEntry to evaluate
+     * @return allAccepted
+     */
+    private fun diffFiltersAccept(diff: DiffEntry): Boolean {
+        val diffFilters = collectConfig!!.diffFilters
+        for (diffFilter in diffFilters) {
+            if (!diffFilter.accept(diff.newPath)) {
+                return false
+            }
+        }
 
-	@Override
-	public SCM clone(Path dest) {
-		log.info("Cloning to " + dest);
-		RDFileUtils.copyDirTree(Paths.get(path), dest);
-		return new GitRepository(dest.toString());
-	}
+        return true
+    }
 
-	@Override
-	public void delete() {
-		// allow to be destroyed more than once
-		if (RDFileUtils.exists(Paths.get(path))) {
-			log.info("Deleting: " + path);
-			try {
-				FileUtils.deleteDirectory(new File(path.toString()));
-			} catch (IOException e) {
-				log.info("Delete failed: " + e);
-			}
-		}
-	}
+    companion object {
+        /* Constants. */
+        private const val MAX_SIZE_OF_A_DIFF = 100000
+        private const val DEFAULT_MAX_NUMBER_OF_FILES_IN_A_COMMIT = 5000
+        private const val BRANCH_MM = "mm" /* TODO mm -> rd. */
 
-	@Override
-	public void setDataToCollect (CollectConfiguration config) {
-		this.collectConfig = config;
-	}
-	
-	/**
-	 * True if all filters accept, else false.
-	 *
-	 * @param diff	DiffEntry to evaluate
-	 * @return allAccepted
-	 */
-	private boolean diffFiltersAccept(DiffEntry diff) {
-		List<DiffFilter> diffFilters = this.collectConfig.getDiffFilters();
-		for (DiffFilter diffFilter : diffFilters) {
-			if (!diffFilter.accept(diff.getNewPath())) {
-				return false;
-			}
-		}
-		
-		return true;
-	}
+        private val log: Logger = LoggerFactory.getLogger(GitRepository::class.java)
+
+        private val developersMap = ConcurrentHashMap<String, DeveloperInfo>()
+        private val filePathMap = ConcurrentHashMap<String, Long>()
+
+        fun singleProject(path: String?): SCMRepository {
+            return GitRepository(path).info()
+        }
+
+        fun singleProject(path: String, singleParentOnly: Boolean, dataBaseUtil: DataBaseUtil?): SCMRepository {
+            return GitRepository(path, singleParentOnly, dataBaseUtil).info()
+        }
+
+        @JvmOverloads
+        fun allProjectsIn(path: String?, singleParentOnly: Boolean = false): Array<SCMRepository> {
+            val repos: MutableList<SCMRepository> = ArrayList()
+
+            for (dir in RDFileUtils.getAllDirsIn(path)) {
+                repos.add(singleProject(dir, singleParentOnly, null))
+            }
+
+            return repos.toTypedArray<SCMRepository>()
+        }
+    }
 }

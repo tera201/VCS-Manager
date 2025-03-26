@@ -1,6 +1,15 @@
 package org.tera201.vcsmanager.util
 
-data class FileEntity(var fileAdded:Int, var fileDeleted:Int, var fileModified:Int, var linesAdded:Int, var linesDeleted:Int, var linesModified:Int, var changes:Int, var changesSize: Int) {
+data class FileEntity(
+    var fileAdded: Int = 0,
+    var fileDeleted: Int = 0,
+    var fileModified: Int = 0,
+    var linesAdded: Int = 0,
+    var linesDeleted: Int = 0,
+    var linesModified: Int = 0,
+    var changes: Int = 0,
+    var changesSize: Int = 0
+) {
 
     fun add(fileEntity: FileEntity) {
         fileAdded += fileEntity.fileAdded
@@ -11,7 +20,17 @@ data class FileEntity(var fileAdded:Int, var fileDeleted:Int, var fileModified:I
         linesModified += fileEntity.linesModified
         changes += fileEntity.changes
     }
-    fun plus(fileAdded:Int, fileDeleted:Int, fileModified:Int, linesAdded:Int, linesDeleted:Int, linesModified:Int, changes:Int, changesSize:Int) {
+
+    fun plus(
+        fileAdded: Int,
+        fileDeleted: Int,
+        fileModified: Int,
+        linesAdded: Int,
+        linesDeleted: Int,
+        linesModified: Int,
+        changes: Int,
+        changesSize: Int
+    ) {
         this.fileAdded += fileAdded
         this.fileDeleted += fileDeleted
         this.fileModified += fileModified
