@@ -27,7 +27,7 @@ interface SCM {
     val changeSets: List<ChangeSet>
 
     /** SCM metadata */
-    fun info(): SCMRepository?
+    val info: SCMRepository?
 
     // ===================== Commit Operations =====================
 

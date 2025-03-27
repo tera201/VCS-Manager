@@ -24,4 +24,5 @@ dependencies {
     }
     implementation("org.xerial:sqlite-jdbc:3.45.3.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.15.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
 }

@@ -38,12 +38,11 @@ object GitRepositoryUtil {
         }
     }
 
-    @Throws(IOException::class)
     fun getCommitsFiles(commit: RevCommit, git: Git): Map<String, FileEntity> {
         val out = ByteArrayOutputStream()
         val paths: MutableMap<String, FileEntity> = HashMap()
         DiffFormatter(out).use { diffFormatter ->
-            commit.parents[0]?.let { parent ->
+            commit.parents.firstOrNull()?.let { parent ->
                 diffFormatter.apply {
                     setRepository(git.repository)
                     setDiffComparator(RawTextComparator.DEFAULT)
@@ -80,7 +79,7 @@ object GitRepositoryUtil {
         return projectSize
     }
 
-    fun updateFileOwnerBasedOnBlame(blameResult: BlameResult, developers: Map<String?, DeveloperInfo>) {
+    fun updateFileOwner(blameResult: BlameResult, developers: Map<String?, DeveloperInfo>) {
         val linesOwners = mutableMapOf<String, Int>()
         val linesSizes = mutableMapOf<String, Long>()
 
@@ -100,7 +99,7 @@ object GitRepositoryUtil {
 
     }
 
-    fun updateFileOwnerBasedOnBlame(
+    fun updateFileOwner(
         blameResult: BlameResult,
         devs: Map<String, String>,
         dataBaseUtil: DataBaseUtil,

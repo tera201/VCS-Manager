@@ -56,7 +56,7 @@ class GitRemoteRepository (
 
             cloneGitRepository(uri, path, bare)
             this.setPath(path.toString())
-            this.setFirstParentOnly(true) // TODO: Add logic if needed
+            this.firstParentOnly = true // TODO: Add logic if needed
 
             hasLocalState = true
         } catch (e: Exception) {
@@ -142,10 +142,10 @@ class GitRemoteRepository (
             singleProject(url, null, false)
 
         fun singleProject(url: String, rootPath: String?, bare: Boolean): SCMRepository =
-            GitRemoteRepository(url, rootPath, bare).info()
+            GitRemoteRepository(url, rootPath, bare).info
 
         fun singleProject(url: String, rootPath: String?, bare: Boolean, username: String?, password: String?, dataBaseUtil: DataBaseUtil?): SCMRepository =
-            GitRemoteRepository(url, rootPath, bare, username, password, dataBaseUtil).info()
+            GitRemoteRepository(url, rootPath, bare, username, password, dataBaseUtil).info
 
         fun getSingleProject(url: String, rootPath: String?, dataBaseUtil: DataBaseUtil?): SCMRepository =
             GitRemoteRepository(url, rootPath, dataBaseUtil = dataBaseUtil).info
