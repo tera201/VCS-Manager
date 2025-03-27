@@ -2,6 +2,7 @@ package org.tera201.vcsmanager.util
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.eclipse.jgit.revwalk.RevCommit
 import org.tera201.vcsmanager.scm.entities.CommitSize
 import org.tera201.vcsmanager.scm.entities.DeveloperInfo
 import java.io.ByteArrayInputStream
@@ -157,13 +158,13 @@ class DataBaseUtil(val url:String) {
         return null
     }
 
-    fun insertCommit(projectId:Int, authorId: Long, hash: String, date: Int, projectSize: Long, stability: Double, fileEntity: FileEntity):String {
+    fun insertCommit(projectId:Int, authorId: Long, commit:RevCommit, projectSize: Long, stability: Double, fileEntity: FileEntity):String {
         val sql = "INSERT OR IGNORE INTO Commits(projectId, authorId, hash, date, projectSize, stability, filesAdded, filesDeleted, filesModified, linesAdded, linesDeleted, linesModified, changes, changesSize) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING hash"
         return retryTransaction({conn.prepareStatement(sql).use { pstmt ->
             pstmt.setInt(1, projectId)
             pstmt.setLong(2, authorId)
-            pstmt.setString(3, hash)
-            pstmt.setInt(4, date)
+            pstmt.setString(3, commit.name)
+            pstmt.setInt(4, commit.commitTime)
             pstmt.setLong(5, projectSize)
             pstmt.setDouble(6, stability)
             pstmt.setInt(7, fileEntity.fileAdded)

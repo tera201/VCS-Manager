@@ -1,5 +1,6 @@
 package org.tera201.vcsmanager.scm
 
+import kotlinx.coroutines.*
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.blame.BlameResult
 import org.eclipse.jgit.diff.DiffEntry
@@ -15,13 +16,130 @@ import org.tera201.vcsmanager.util.BlameEntity
 import org.tera201.vcsmanager.util.DataBaseUtil
 import org.tera201.vcsmanager.util.FileEntity
 import java.io.ByteArrayOutputStream
-import java.io.IOException
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 object GitRepositoryUtil {
     private val fileSizeCache = mutableMapOf<String, Long?>()
 
-    @Throws(IOException::class)
+    fun dbPrepared(git: Git, dataBaseUtil: DataBaseUtil, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>) {
+        developersMap.clear()
+
+        val coroutineScope = CoroutineScope(Dispatchers.IO)
+        coroutineScope.launch {
+            git.use { git ->
+                val commits = git.log().call().filter { commit -> !dataBaseUtil.isCommitExist(commit.name) }
+                val authorIdCache = ConcurrentHashMap<String, Long>()
+                val commitJobs = commits.map { commit ->
+                    async {
+                        try {
+                            val dbAsync = DataBaseUtil(dataBaseUtil.url)
+                            val fileList: MutableList<org.tera201.vcsmanager.scm.entities.FileEntity> = mutableListOf()
+                            val author = commit.authorIdent
+                            val authorId = authorIdCache.computeIfAbsent(author.emailAddress) { email ->
+                                dataBaseUtil.getAuthorId(projectId, email)
+                                    ?: dbAsync.insertAuthor(projectId, author.name, email)!!
+                            }
+
+                            val paths = getCommitsFiles(commit, git)
+                            paths.keys.forEach { filePath ->
+                                filePathMap.computeIfAbsent(filePath) { path ->
+                                    dataBaseUtil.getFilePathId(projectId, path)
+                                        ?: dbAsync.insertFilePath(projectId, path)!!
+                                }
+                            }
+
+                            val stability =
+                                CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit))
+                            val commitSize = processCommitSize(commit, git)
+                            val fileEntity = paths.values.reduce { acc, fileEntity -> acc.add(fileEntity); acc }
+
+                            dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
+
+                            paths.keys.forEach { filePath ->
+                                fileList.add(
+                                    org.tera201.vcsmanager.scm.entities.FileEntity(
+                                        projectId, filePath, filePathMap[filePath]!!, commit.name, commit.commitTime
+                                    )
+                                )
+                            }
+
+                            dbAsync.insertFile(fileList)
+                            dbAsync.closeConnection()
+                        } catch (e: Exception) {
+                            println("Error processing commit ${commit.name}: ${e.message}")
+                        }
+                    }
+                }
+                commitJobs.awaitAll()
+            }
+        }
+    }
+
+    fun getDeveloperInfo(git: Git, dataBaseUtil: DataBaseUtil, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>, path:String, nodePath: String?, repositoryFiles:List<RepositoryFile>): Map<String, DeveloperInfo> {
+        return runBlocking {
+            git.use { git ->
+                val localPath = nodePath?.takeIf { it != path && it.startsWith(path) }
+                    ?.substring(path.length + 1)?.replace("\\", "/")
+                val commits = if (localPath != null) git.log().addPath(localPath).call() else git.log().call()
+
+                val commitJobs = commits.map { commit ->
+                    async {
+                        val dbAsync = DataBaseUtil(dataBaseUtil.url)
+                        dbAsync.getCommit(projectId, commit.name)?.let { commitEntity ->
+                            developersMap.computeIfAbsent(commitEntity.authorEmail) {
+                                DeveloperInfo(commitEntity, commit)
+                            }
+                                .updateByCommit(commitEntity, commit)
+                        }
+                        dbAsync.closeConnection()
+
+                    }
+                }
+                commitJobs.awaitAll()
+
+                val head = git.repository.resolve(Constants.HEAD)
+                val fileStream = repositoryFiles
+                    .filter { (it.file.path.startsWith(localPath ?: "") && !it.file.path.endsWith(".DS_Store")) }
+                    .map { it.file.path.substring(path.length + 1).replace("\\", "/") }
+                    .filter { filePathMap.keys.contains(it) }
+                val fileHashes =
+                    fileStream.map { it to head.name }
+                        .filter {
+                            dataBaseUtil
+                                .getBlameFileId(projectId, filePathMap[it.first]!!, it.second!!) == null
+                        }
+                val fileAndBlameHashes = fileHashes.map {
+                    it.first to dataBaseUtil.insertBlameFile(
+                        projectId,
+                        filePathMap[it.first]!!,
+                        it.second!!
+                    )
+                }
+
+                val devs = dataBaseUtil.getDevelopersByProjectId(projectId)
+
+                val fileProcessingJobs = fileAndBlameHashes.toSet().map { (filePath, blameId) ->
+                    async(Dispatchers.IO) {
+                        val dbAsync = DataBaseUtil(dataBaseUtil.url)
+                        runCatching {
+                            git.blame().setFilePath(filePath).setStartCommit(head).call()?.let {
+                                updateFileOwner(it, devs, dbAsync, projectId, blameId, head.name)
+                            }
+                            dbAsync.updateBlameFileSize(blameId)
+                        }.onFailure { it.printStackTrace() }
+                        dbAsync.closeConnection()
+
+                    }
+                }
+                fileProcessingJobs.awaitAll()
+
+                dataBaseUtil.developerUpdateByBlameInfo(projectId, developersMap)
+            }
+            developersMap
+        }
+    }
+
     fun analyzeCommit(commit: RevCommit, git: Git, dev: DeveloperInfo) {
         DiffFormatter(DisabledOutputStream.INSTANCE).use { diffFormatter ->
             commit.parents[0]?.let { parent ->
@@ -38,12 +156,11 @@ object GitRepositoryUtil {
         }
     }
 
-    @Throws(IOException::class)
     fun getCommitsFiles(commit: RevCommit, git: Git): Map<String, FileEntity> {
         val out = ByteArrayOutputStream()
         val paths: MutableMap<String, FileEntity> = HashMap()
         DiffFormatter(out).use { diffFormatter ->
-            commit.parents[0]?.let { parent ->
+            commit.parents.firstOrNull()?.let { parent ->
                 diffFormatter.apply {
                     setRepository(git.repository)
                     setDiffComparator(RawTextComparator.DEFAULT)
@@ -80,7 +197,7 @@ object GitRepositoryUtil {
         return projectSize
     }
 
-    fun updateFileOwnerBasedOnBlame(blameResult: BlameResult, developers: Map<String?, DeveloperInfo>) {
+    fun updateFileOwner(blameResult: BlameResult, developers: Map<String?, DeveloperInfo>) {
         val linesOwners = mutableMapOf<String, Int>()
         val linesSizes = mutableMapOf<String, Long>()
 
@@ -100,7 +217,7 @@ object GitRepositoryUtil {
 
     }
 
-    fun updateFileOwnerBasedOnBlame(
+    fun updateFileOwner(
         blameResult: BlameResult,
         devs: Map<String, String>,
         dataBaseUtil: DataBaseUtil,

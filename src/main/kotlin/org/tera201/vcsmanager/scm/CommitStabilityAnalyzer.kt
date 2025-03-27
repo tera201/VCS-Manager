@@ -10,7 +10,6 @@ import kotlin.math.max
 import kotlin.math.min
 
 object CommitStabilityAnalyzer {
-    @Throws(Exception::class)
     fun analyzeCommit(git: Git, commitList: List<RevCommit>, commit: RevCommit, index: Int): Double {
         var commitStability = 1.0
         val commitDate = commit.committerIdent.getWhen()
@@ -44,7 +43,6 @@ object CommitStabilityAnalyzer {
         return nextMonthCommits
     }
 
-    @Throws(Exception::class)
     private fun calculateCommitStability(git: Git, targetCommit: RevCommit, lastMonthCommit: RevCommit): Double {
         val parent = if (targetCommit.parentCount > 0) targetCommit.getParent(0) else null
         val editsAB: MutableList<Edit> = ArrayList()

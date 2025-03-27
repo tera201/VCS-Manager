@@ -1,16 +1,10 @@
 package org.tera201.vcsmanager.scm
 
-import org.eclipse.jgit.api.errors.GitAPIException
 import org.eclipse.jgit.lib.Ref
 import org.tera201.vcsmanager.domain.ChangeSet
 import org.tera201.vcsmanager.domain.Commit
 import org.tera201.vcsmanager.domain.Modification
-import org.tera201.vcsmanager.scm.entities.BlameManager
-import org.tera201.vcsmanager.scm.entities.BlamedLine
-import org.tera201.vcsmanager.scm.entities.CommitSize
 import org.tera201.vcsmanager.scm.entities.DeveloperInfo
-import org.tera201.vcsmanager.scm.exceptions.CheckoutException
-import java.io.IOException
 import java.nio.file.Path
 
 interface SCM {
@@ -27,7 +21,7 @@ interface SCM {
     val changeSets: List<ChangeSet>
 
     /** SCM metadata */
-    fun info(): SCMRepository?
+    val info: SCMRepository?
 
     // ===================== Commit Operations =====================
 
@@ -53,7 +47,6 @@ interface SCM {
     /** Retrieves the current branch or tag name. */
     val currentBranchOrTagName: String
 
-    @Throws(CheckoutException::class)
     fun checkoutTo(branch: String)
 
     /** Returns the repository to the state of a specific commit by [id]. */
@@ -62,44 +55,15 @@ interface SCM {
     /** Resets the repository to the HEAD state. */
     fun reset()
 
-    // ===================== Repository Size Information =====================
-
-    /** Retrieves repository size metrics. */
-    fun repositoryAllSize(): Map<String, CommitSize>
-
-    /** Retrieves size information for a specific [filePath]. */
-    fun repositorySize(filePath: String): Map<String, CommitSize>
-
-    /** Retrieves size information for a given [branchOrTag] and [filePath]. */
-    fun repositorySize(branchOrTag: String, filePath: String): Map<String, CommitSize>
-
     // ===================== Commit Differences =====================
 
     /** Retrieves a list of modifications between [priorCommit] and [laterCommit]. */
     fun getDiffBetweenCommits(priorCommit: String, laterCommit: String): List<Modification>
 
-    // ===================== Blame Information =====================
-
-    /**
-     * Retrieves blame information for a given [file].
-     */
-    fun blame(file: String): List<BlamedLine>
-
-    /** Retrieves a blame manager instance. */
-    fun blameManager(): BlameManager?
-
-    /**
-     * Retrieves blame information for a [file], considering [commitToBeBlamed].
-     * If [priorCommit] is `true`, retrieves the prior commit’s blame.
-     */
-    fun blame(file: String, commitToBeBlamed: String, priorCommit: Boolean): List<BlamedLine>
-
     // ===================== Developer Information =====================
 
-    @get:Throws(IOException::class, GitAPIException::class)
     val developerInfo: Map<String, DeveloperInfo>
 
-    @Throws(IOException::class, GitAPIException::class)
     fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo>
 
     // ===================== Repository State =====================
@@ -127,7 +91,6 @@ interface SCM {
      */
     fun setDataToCollect(config: CollectConfiguration)
 
-    /** Prepares the database, handling potential [GitAPIException] and [IOException]. */
-    @Throws(GitAPIException::class, IOException::class)
+    /** Prepares the database. */
     fun dbPrepared()
 }

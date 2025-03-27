@@ -4,10 +4,7 @@ import org.apache.commons.io.FileUtils
 import org.eclipse.jgit.api.errors.GitAPIException
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import org.tera201.vcsmanager.scm.GitRemoteRepository
-import org.tera201.vcsmanager.scm.GitRepository
-import org.tera201.vcsmanager.scm.SCMRepository
-import org.tera201.vcsmanager.scm.SingleGitRemoteRepositoryBuilder
+import org.tera201.vcsmanager.scm.*
 import org.tera201.vcsmanager.scm.exceptions.CheckoutException
 import org.tera201.vcsmanager.util.DataBaseUtil
 import java.io.File
@@ -15,60 +12,43 @@ import java.io.IOException
 
 class BuildModel {
     fun createClone(gitUrl: String): SCMRepository {
-        return GitRemoteRepository
-            .hostedOn(gitUrl)
-            .buildAsSCMRepository()
+        return GitRepositoryBuilder(gitUrl).buildAsRemoteSCMRepository()
     }
 
     fun createClone(gitUrl: String, path: String, dataBaseDirPath: String): SCMRepository {
         val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
         dataBaseUtil.create()
-        return GitRemoteRepository
-            .hostedOn(gitUrl)
-            .inTempDir(path)
-            .dateBase(dataBaseUtil)
-            .buildAsSCMRepository()
+        return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(dataBaseUtil).buildAsRemoteSCMRepository()
     }
 
     fun createClone(gitUrl: String, path: String, username: String, password: String, dataBaseDirPath: String ): SCMRepository {
         val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
         dataBaseUtil.create()
-        return GitRemoteRepository
-            .hostedOn(gitUrl)
+        return GitRepositoryBuilder(gitUrl)
             .inTempDir(path)
-            .creds(username, password)
+            .credentials(username, password)
             .dateBase(dataBaseUtil)
-            .buildAsSCMRepository()
+            .buildAsRemoteSCMRepository()
     }
 
-    fun getRepository(gitUrl: String, path: String?, dataBaseDirPath: String): SCMRepository {
+    fun getRepository(gitUrl: String, path: String, dataBaseDirPath: String): SCMRepository {
         val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
         dataBaseUtil.create()
-        return GitRemoteRepository
-            .hostedOn(gitUrl)
-            .inTempDir(path)
-            .dateBase(dataBaseUtil)
-            .asSCMRepository
+        return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(dataBaseUtil).buildAsRemoteSCMRepository()
     }
 
-    fun getRepository(projectPath: String?, dataBaseDirPath: String): SCMRepository {
+    fun getRepository(projectPath: String, dataBaseDirPath: String): SCMRepository {
         val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
         dataBaseUtil.create()
-        return SingleGitRemoteRepositoryBuilder()
-            .inTempDir(projectPath)
-            .dateBase(dataBaseUtil)
-            .asSCMRepository
+        return GitRepositoryBuilder().inTempDir(projectPath).dateBase(dataBaseUtil).buildAsLocalSCMRepository()
     }
 
     fun getRepoNameByUrl(gitUrl: String): String {
         return GitRemoteRepository.repoNameFromURI(gitUrl)
     }
 
-    @Throws(GitAPIException::class)
     fun createRepo(gitUrl: String): GitRemoteRepository {
-        return GitRemoteRepository
-            .hostedOn(gitUrl)
-            .build()
+        return GitRepositoryBuilder(gitUrl).buildAsRemote()
     }
 
     fun getBranches(repo: SCMRepository): List<String> = repo.scm.allBranches.map { it.name }

@@ -8,9 +8,7 @@ class FirstParentFilter : RevFilter() {
     private val ignoreCommits: MutableSet<RevCommit> = HashSet()
 
     override fun include(revWalk: RevWalk, commit: RevCommit): Boolean {
-        if (commit.parentCount > 1) {
-            ignoreCommits.add(commit.getParent(1))
-        }
+        if (commit.parentCount > 1) ignoreCommits.add(commit.getParent(1))
 
         return if (ignoreCommits.contains(commit)) {
             ignoreCommits.remove(commit)

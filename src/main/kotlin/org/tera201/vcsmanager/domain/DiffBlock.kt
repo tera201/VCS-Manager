@@ -1,6 +1,6 @@
 package org.tera201.vcsmanager.domain
 
-import org.tera201.vcsmanager.RepoDrillerException
+import org.tera201.vcsmanager.VCSException
 import java.util.regex.Pattern
 
 class DiffBlock(val diffBlock: String) {
@@ -22,7 +22,7 @@ class DiffBlock(val diffBlock: String) {
             d3 = matcher.group(3).toInt()
             d4 = matcher.group(4).toInt()
         } else {
-            throw RepoDrillerException("Impossible to get line positions in this diff: $diffBlock")
+            throw VCSException("Impossible to get line positions in this diff: $diffBlock")
         }
     }
 
@@ -37,7 +37,7 @@ class DiffBlock(val diffBlock: String) {
             }
         }
 
-        if (counter != start + qtyLines) throw RepoDrillerException("Malformed diff")
+        if (counter != start + qtyLines) throw VCSException("Malformed diff")
         return oldLines
     }
 
@@ -46,7 +46,7 @@ class DiffBlock(val diffBlock: String) {
             line.startsWith(" ") -> DiffLineType.KEPT
             line.startsWith("+") -> DiffLineType.ADDED
             line.startsWith("-") -> DiffLineType.REMOVED
-            else -> throw RepoDrillerException("Type of diff line not recognized: $line")
+            else -> throw VCSException("Type of diff line not recognized: $line")
         }
 
     val linesInOldFile: List<DiffLine> = getLines(d1, d2, "-")
