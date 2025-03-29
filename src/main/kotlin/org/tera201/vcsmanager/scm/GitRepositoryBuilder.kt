@@ -1,6 +1,6 @@
 package org.tera201.vcsmanager.scm
 
-import org.tera201.vcsmanager.util.DataBaseUtil
+import org.tera201.vcsmanager.util.VCSDataBase
 
 class GitRepositoryBuilder {
     private var gitUrl: String? = null
@@ -8,7 +8,7 @@ class GitRepositoryBuilder {
     private var bare: Boolean = false
     private var username: String? = null
     private var password: String? = null
-    private var dataBaseUtil: DataBaseUtil? = null
+    private var vcsDataBase: VCSDataBase? = null
 
     constructor()
 
@@ -23,17 +23,17 @@ class GitRepositoryBuilder {
         this.password = password
     }
 
-    fun dateBase(dateBase: DataBaseUtil): GitRepositoryBuilder  = apply { dataBaseUtil = dateBase }
+    fun dateBase(dateBase: VCSDataBase): GitRepositoryBuilder  = apply { vcsDataBase = dateBase }
 
     fun asBareRepos(): GitRepositoryBuilder = apply { bare = true }
 
     fun buildAsRemote(): GitRemoteRepository =
-        GitRemoteRepository(gitUrl!!, this.tempDir, this.bare, this.username, this.password, dataBaseUtil)
+        GitRemoteRepository(gitUrl!!, this.tempDir, this.bare, this.username, this.password, vcsDataBase)
 
-    fun buildAsLocal(): GitRepository = GitRepository("", true, dataBaseUtil)
+    fun buildAsLocal(): GitRepository = GitRepository("", true, vcsDataBase)
 
     fun buildAsRemoteSCMRepository(): SCMRepository =
-        GitRemoteRepository(gitUrl!!, tempDir, bare, username, password, dataBaseUtil).info
+        GitRemoteRepository(gitUrl!!, tempDir, bare, username, password, vcsDataBase).info
 
-    fun buildAsLocalSCMRepository(): SCMRepository  = GitRepository("", true, dataBaseUtil).info
+    fun buildAsLocalSCMRepository(): SCMRepository  = GitRepository("", true, vcsDataBase).info
 }

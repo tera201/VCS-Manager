@@ -20,7 +20,7 @@ import org.tera201.vcsmanager.VCSException
 import org.tera201.vcsmanager.domain.*
 import org.tera201.vcsmanager.scm.entities.*
 import org.tera201.vcsmanager.scm.exceptions.CheckoutException
-import org.tera201.vcsmanager.util.DataBaseUtil
+import org.tera201.vcsmanager.util.VCSDataBase
 import org.tera201.vcsmanager.util.RDFileUtils
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -42,7 +42,7 @@ open class GitRepository : SCM {
     var path: String
     protected var firstParentOnly = false
     var sizeCache: Map<ObjectId, Long> = ConcurrentHashMap()
-    protected open var dataBaseUtil: DataBaseUtil? = null
+    protected open var vcsDataBase: VCSDataBase? = null
     protected open var projectId: Int? = null
     override val changeSets: List<ChangeSet>
         get() = kotlin.runCatching {
@@ -52,13 +52,13 @@ open class GitRepository : SCM {
     /** Constructor, initializes the repository with given path and options */
     protected constructor() : this("")
 
-    constructor(path: String, firstParentOnly: Boolean = false, dataBaseUtil: DataBaseUtil? = null) {
+    constructor(path: String, firstParentOnly: Boolean = false, vcsDataBase: VCSDataBase? = null) {
         log.debug("Creating a GitRepository from path $path")
-        this.dataBaseUtil = dataBaseUtil
+        this.vcsDataBase = vcsDataBase
         this.path = path
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
         repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
-        val projectId = dataBaseUtil?.getProjectId(repoName, path) ?: dataBaseUtil?.insertProject(repoName, path)
+        val projectId = vcsDataBase?.getProjectId(repoName, path) ?: vcsDataBase?.insertProject(repoName, path)
         this.firstParentOnly = firstParentOnly
         maxNumberFilesInACommit = checkMaxNumberOfFiles()
         maxSizeOfDiff = checkMaxSizeOfDiff()
@@ -365,11 +365,11 @@ open class GitRepository : SCM {
     override val developerInfo get() = getDeveloperInfo(null)
 
     override fun dbPrepared() =
-        GitRepositoryUtil.dbPrepared(git, dataBaseUtil!!, projectId!!, filePathMap, developersMap)
+        GitRepositoryUtil.dbPrepared(git, vcsDataBase!!, projectId!!, filePathMap, developersMap)
 
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> {
         return GitRepositoryUtil.
-        getDeveloperInfo(git, dataBaseUtil!!, projectId!!, filePathMap, developersMap, path, nodePath, files())
+        getDeveloperInfo(git, vcsDataBase!!, projectId!!, filePathMap, developersMap, path, nodePath, files())
     }
 
     override fun getCommitFromTag(tag: String): String =

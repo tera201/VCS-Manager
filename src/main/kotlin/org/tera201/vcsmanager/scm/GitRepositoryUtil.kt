@@ -13,7 +13,7 @@ import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.util.io.DisabledOutputStream
 import org.tera201.vcsmanager.scm.entities.DeveloperInfo
 import org.tera201.vcsmanager.util.BlameEntity
-import org.tera201.vcsmanager.util.DataBaseUtil
+import org.tera201.vcsmanager.util.VCSDataBase
 import org.tera201.vcsmanager.util.FileEntity
 import java.io.ByteArrayOutputStream
 import java.util.*
@@ -22,29 +22,29 @@ import java.util.concurrent.ConcurrentHashMap
 object GitRepositoryUtil {
     private val fileSizeCache = mutableMapOf<String, Long?>()
 
-    fun dbPrepared(git: Git, dataBaseUtil: DataBaseUtil, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>) {
+    fun dbPrepared(git: Git, vcsDataBase: VCSDataBase, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>) {
         developersMap.clear()
 
         val coroutineScope = CoroutineScope(Dispatchers.IO)
         coroutineScope.launch {
             git.use { git ->
-                val commits = git.log().call().filter { commit -> !dataBaseUtil.isCommitExist(commit.name) }
+                val commits = git.log().call().filter { commit -> !vcsDataBase.isCommitExist(commit.name) }
                 val authorIdCache = ConcurrentHashMap<String, Long>()
                 val commitJobs = commits.map { commit ->
                     async {
                         try {
-                            val dbAsync = DataBaseUtil(dataBaseUtil.url)
+                            val dbAsync = VCSDataBase(vcsDataBase.url)
                             val fileList: MutableList<org.tera201.vcsmanager.scm.entities.FileEntity> = mutableListOf()
                             val author = commit.authorIdent
                             val authorId = authorIdCache.computeIfAbsent(author.emailAddress) { email ->
-                                dataBaseUtil.getAuthorId(projectId, email)
+                                vcsDataBase.getAuthorId(projectId, email)
                                     ?: dbAsync.insertAuthor(projectId, author.name, email)!!
                             }
 
                             val paths = getCommitsFiles(commit, git)
                             paths.keys.forEach { filePath ->
                                 filePathMap.computeIfAbsent(filePath) { path ->
-                                    dataBaseUtil.getFilePathId(projectId, path)
+                                    vcsDataBase.getFilePathId(projectId, path)
                                         ?: dbAsync.insertFilePath(projectId, path)!!
                                 }
                             }
@@ -76,7 +76,7 @@ object GitRepositoryUtil {
         }
     }
 
-    fun getDeveloperInfo(git: Git, dataBaseUtil: DataBaseUtil, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>, path:String, nodePath: String?, repositoryFiles:List<RepositoryFile>): Map<String, DeveloperInfo> {
+    fun getDeveloperInfo(git: Git, vcsDataBase: VCSDataBase, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>, path:String, nodePath: String?, repositoryFiles:List<RepositoryFile>): Map<String, DeveloperInfo> {
         return runBlocking {
             git.use { git ->
                 val localPath = nodePath?.takeIf { it != path && it.startsWith(path) }
@@ -85,7 +85,7 @@ object GitRepositoryUtil {
 
                 val commitJobs = commits.map { commit ->
                     async {
-                        val dbAsync = DataBaseUtil(dataBaseUtil.url)
+                        val dbAsync = VCSDataBase(vcsDataBase.url)
                         dbAsync.getCommit(projectId, commit.name)?.let { commitEntity ->
                             developersMap.computeIfAbsent(commitEntity.authorEmail) {
                                 DeveloperInfo(commitEntity, commit)
@@ -106,22 +106,22 @@ object GitRepositoryUtil {
                 val fileHashes =
                     fileStream.map { it to head.name }
                         .filter {
-                            dataBaseUtil
+                            vcsDataBase
                                 .getBlameFileId(projectId, filePathMap[it.first]!!, it.second!!) == null
                         }
                 val fileAndBlameHashes = fileHashes.map {
-                    it.first to dataBaseUtil.insertBlameFile(
+                    it.first to vcsDataBase.insertBlameFile(
                         projectId,
                         filePathMap[it.first]!!,
                         it.second!!
                     )
                 }
 
-                val devs = dataBaseUtil.getDevelopersByProjectId(projectId)
+                val devs = vcsDataBase.getDevelopersByProjectId(projectId)
 
                 val fileProcessingJobs = fileAndBlameHashes.toSet().map { (filePath, blameId) ->
                     async(Dispatchers.IO) {
-                        val dbAsync = DataBaseUtil(dataBaseUtil.url)
+                        val dbAsync = VCSDataBase(vcsDataBase.url)
                         runCatching {
                             git.blame().setFilePath(filePath).setStartCommit(head).call()?.let {
                                 updateFileOwner(it, devs, dbAsync, projectId, blameId, head.name)
@@ -134,7 +134,7 @@ object GitRepositoryUtil {
                 }
                 fileProcessingJobs.awaitAll()
 
-                dataBaseUtil.developerUpdateByBlameInfo(projectId, developersMap)
+                vcsDataBase.developerUpdateByBlameInfo(projectId, developersMap)
             }
             developersMap
         }
@@ -220,7 +220,7 @@ object GitRepositoryUtil {
     fun updateFileOwner(
         blameResult: BlameResult,
         devs: Map<String, String>,
-        dataBaseUtil: DataBaseUtil,
+        vcsDataBase: VCSDataBase,
         projectId: Int,
         blameFileId: Int,
         headHash: String
@@ -239,7 +239,7 @@ object GitRepositoryUtil {
             }
         }
 
-        dataBaseUtil.insertBlame(blameEntities.values.toList())
+        vcsDataBase.insertBlame(blameEntities.values.toList())
     }
 
     private fun FileEntity.applyChanges(diff: DiffEntry, diffFormatter: DiffFormatter, diffSize: Int) {

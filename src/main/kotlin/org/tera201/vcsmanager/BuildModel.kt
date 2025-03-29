@@ -6,7 +6,7 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.tera201.vcsmanager.scm.*
 import org.tera201.vcsmanager.scm.exceptions.CheckoutException
-import org.tera201.vcsmanager.util.DataBaseUtil
+import org.tera201.vcsmanager.util.VCSDataBase
 import java.io.File
 import java.io.IOException
 
@@ -16,31 +16,31 @@ class BuildModel {
     }
 
     fun createClone(gitUrl: String, path: String, dataBaseDirPath: String): SCMRepository {
-        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
-        dataBaseUtil.create()
-        return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(dataBaseUtil).buildAsRemoteSCMRepository()
+        val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
+        vcsDataBase.createTables()
+        return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(vcsDataBase).buildAsRemoteSCMRepository()
     }
 
     fun createClone(gitUrl: String, path: String, username: String, password: String, dataBaseDirPath: String ): SCMRepository {
-        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
-        dataBaseUtil.create()
+        val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
+        vcsDataBase.createTables()
         return GitRepositoryBuilder(gitUrl)
             .inTempDir(path)
             .credentials(username, password)
-            .dateBase(dataBaseUtil)
+            .dateBase(vcsDataBase)
             .buildAsRemoteSCMRepository()
     }
 
     fun getRepository(gitUrl: String, path: String, dataBaseDirPath: String): SCMRepository {
-        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
-        dataBaseUtil.create()
-        return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(dataBaseUtil).buildAsRemoteSCMRepository()
+        val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
+        vcsDataBase.createTables()
+        return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(vcsDataBase).buildAsRemoteSCMRepository()
     }
 
     fun getRepository(projectPath: String, dataBaseDirPath: String): SCMRepository {
-        val dataBaseUtil = DataBaseUtil("$dataBaseDirPath/repository.db")
-        dataBaseUtil.create()
-        return GitRepositoryBuilder().inTempDir(projectPath).dateBase(dataBaseUtil).buildAsLocalSCMRepository()
+        val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
+        vcsDataBase.createTables()
+        return GitRepositoryBuilder().inTempDir(projectPath).dateBase(vcsDataBase).buildAsLocalSCMRepository()
     }
 
     fun getRepoNameByUrl(gitUrl: String): String {

@@ -11,6 +11,10 @@ data class FileEntity(
     var changesSize: Int = 0
 ) {
 
+    fun getSQLArgs():Array<Any> {
+        return arrayOf(fileAdded, fileDeleted, fileModified, linesAdded, linesDeleted, linesModified, changes, changesSize)
+    }
+
     fun add(fileEntity: FileEntity) {
         fileAdded += fileEntity.fileAdded
         fileDeleted += fileEntity.fileDeleted

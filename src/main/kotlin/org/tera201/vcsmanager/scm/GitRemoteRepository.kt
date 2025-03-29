@@ -7,7 +7,7 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.tera201.vcsmanager.VCSException
-import org.tera201.vcsmanager.util.DataBaseUtil
+import org.tera201.vcsmanager.util.VCSDataBase
 import org.tera201.vcsmanager.util.PathUtils
 import org.tera201.vcsmanager.util.RDFileUtils.exists
 import org.tera201.vcsmanager.util.RDFileUtils.getTempPath
@@ -33,7 +33,7 @@ class GitRemoteRepository(
     bare: Boolean = false,
     private val username: String? = null,
     private val password: String? = null,
-    override var dataBaseUtil: DataBaseUtil? = null
+    override var vcsDataBase: VCSDataBase? = null
 ) : GitRepository() {
     private var hasLocalState = false
     private var repoName: String = repoNameFromURI(uri)
@@ -44,7 +44,7 @@ class GitRemoteRepository(
 
     init {
         try {
-            dataBaseUtil?.let {
+            vcsDataBase?.let {
                 projectId = it.getProjectId(repoName, destinationPath.toString()) ?: it.insertProject(
                     repoName,
                     destinationPath.toString()

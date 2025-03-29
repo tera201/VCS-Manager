@@ -6,4 +6,6 @@ data class FileEntity(
     val filePathId: Long,
     val hash: String?,
     val date: Int
-)
+) {
+    fun getSQLArgs(): Array<Any> =  arrayOf(projectId, filePathId, hash, date)
+}
