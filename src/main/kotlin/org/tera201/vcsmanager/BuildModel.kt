@@ -83,19 +83,15 @@ class BuildModel {
     companion object {
         private val log: Logger = LoggerFactory.getLogger(GitRepository::class.java)
 
-        @Throws(GitAPIException::class, IOException::class)
-        @JvmStatic
         fun main(args: Array<String>) {
             val projectRoot = File(".").absolutePath
-            val csvPath = projectRoot.replace(".", "csv-generated")
             val tempDir = projectRoot.replace(".", "clonedGit")
 
-            File(csvPath).mkdirs()
+            File(tempDir).mkdirs()
 
             val gitUrl = "https://github.com/arnohaase/a-foundation.git"
 
             val buildModel = BuildModel()
-            log.info("Builded")
 
             val repo = buildModel.getRepository(gitUrl, "$tempDir/a-foundation", "$tempDir/db")
 

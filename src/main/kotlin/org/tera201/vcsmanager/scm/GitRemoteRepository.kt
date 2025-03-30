@@ -33,10 +33,9 @@ class GitRemoteRepository(
     bare: Boolean = false,
     private val username: String? = null,
     private val password: String? = null,
-    override var vcsDataBase: VCSDataBase? = null
+    dataBase: VCSDataBase? = null
 ) : GitRepository() {
     private var hasLocalState = false
-    private var repoName: String = repoNameFromURI(uri)
     private var destinationPath: Path =
         Paths.get(destination?.let { "$it/$repoName" } ?: (getTempPath() + "-" + repoName))
     override var projectId: Int? = null
@@ -44,11 +43,13 @@ class GitRemoteRepository(
 
     init {
         try {
-            vcsDataBase?.let {
+            repoName = repoNameFromURI(uri)
+            dataBase?.let {
                 projectId = it.getProjectId(repoName, destinationPath.toString()) ?: it.insertProject(
                     repoName,
                     destinationPath.toString()
                 )
+                vcsDataBase = dataBase
             }
 
             if (exists(destinationPath)) {

@@ -37,12 +37,11 @@ open class GitRepository : SCM {
     var maxNumberFilesInACommit: Int = -1 /* TODO Expose an API to control this value? Also in SubversionRepository. */
         private set
     private var maxSizeOfDiff = -1 /* TODO Expose an API to control this value? Also in SubversionRepository. */
-    private var collectConfig: CollectConfiguration? = null
-    private var repoName: String
+    private var collectConfig: CollectConfiguration = CollectConfiguration().everything()
+    var repoName: String
     var path: String
     protected var firstParentOnly = false
-    var sizeCache: Map<ObjectId, Long> = ConcurrentHashMap()
-    protected open var vcsDataBase: VCSDataBase? = null
+    protected var vcsDataBase: VCSDataBase
     protected open var projectId: Int? = null
     override val changeSets: List<ChangeSet>
         get() = kotlin.runCatching {
@@ -54,15 +53,14 @@ open class GitRepository : SCM {
 
     constructor(path: String, firstParentOnly: Boolean = false, vcsDataBase: VCSDataBase? = null) {
         log.debug("Creating a GitRepository from path $path")
-        this.vcsDataBase = vcsDataBase
         this.path = path
+        this.vcsDataBase = vcsDataBase ?:  VCSDataBase("$path/repository.db")
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
         repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
         val projectId = vcsDataBase?.getProjectId(repoName, path) ?: vcsDataBase?.insertProject(repoName, path)
         this.firstParentOnly = firstParentOnly
         maxNumberFilesInACommit = checkMaxNumberOfFiles()
         maxSizeOfDiff = checkMaxSizeOfDiff()
-        this.collectConfig = CollectConfiguration().everything()
     }
 
     override val info: SCMRepository
@@ -162,7 +160,7 @@ open class GitRepository : SCM {
             val jgitCommit = git.log().add(repo.resolve(id)).call().firstOrNull() ?: return null
 
             /* Extract metadata. */
-            val msg = if (collectConfig?.isCollectingCommitMessages == true) jgitCommit.fullMessage.trim() else ""
+            val msg = if (collectConfig.isCollectingCommitMessages == true) jgitCommit.fullMessage.trim() else ""
             val branches = getBranches(git, jgitCommit.name)
             val isCommitInMainBranch = branches.contains(this.mainBranchName)
 
@@ -185,7 +183,7 @@ open class GitRepository : SCM {
     }
 
     private fun getBranches(git: Git, hash: String): Set<String?> {
-        if (!collectConfig!!.isCollectingBranches) return HashSet()
+        if (!collectConfig.isCollectingBranches) return HashSet()
 
         val gitBranches = git.branchList().setContains(hash).call()
         return gitBranches.stream()
@@ -301,7 +299,7 @@ open class GitRepository : SCM {
     }
 
     private fun getSourceCode(repo: Repository, diff: DiffEntry): String {
-        if (!collectConfig!!.isCollectingSourceCode) return ""
+        if (!collectConfig.isCollectingSourceCode) return ""
         return runCatching {
             val reader = repo.newObjectReader()
             val bytes = reader.open(diff.newId.toObjectId()).bytes
@@ -310,7 +308,7 @@ open class GitRepository : SCM {
     }
 
     private fun getDiffText(repo: Repository, diff: DiffEntry): String {
-        if (!collectConfig!!.isCollectingDiffs) return ""
+        if (!collectConfig.isCollectingDiffs) return ""
 
         val out = ByteArrayOutputStream()
         try {
@@ -429,7 +427,7 @@ open class GitRepository : SCM {
 
     /** True if all filters accept, else false. */
     private fun diffFiltersAccept(diff: DiffEntry): Boolean =
-        collectConfig!!.diffFilters.any { !it.accept(diff.newPath) }.not()
+        collectConfig.diffFilters.any { !it.accept(diff.newPath) }.not()
 
     companion object {
         /* Constants. */
