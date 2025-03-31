@@ -32,33 +32,25 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.stream.Collectors
 
 /* TODO Name: Sounds like it inherits SCMRepository, but it actually implements SCM. */
-open class GitRepository : SCM {
+open class GitRepository
+    (var path: String = "", var repoName: String, protected var firstParentOnly: Boolean = false, vcsDataBase: VCSDataBase? = null) : SCM {
+    private var vcsDataBase: VCSDataBase
     private var mainBranchName: String? = null
-    var maxNumberFilesInACommit: Int = -1 /* TODO Expose an API to control this value? Also in SubversionRepository. */
-        private set
+    private var maxNumberFilesInACommit: Int = -1 /* TODO Expose an API to control this value? Also in SubversionRepository. */
     private var maxSizeOfDiff = -1 /* TODO Expose an API to control this value? Also in SubversionRepository. */
     private var collectConfig: CollectConfiguration = CollectConfiguration().everything()
-    var repoName: String
-    var path: String
-    protected var firstParentOnly = false
-    protected var vcsDataBase: VCSDataBase
-    protected open var projectId: Int? = null
+    private val projectId: Int
+        get() = vcsDataBase.getProjectId(repoName, path) ?: this.vcsDataBase.insertProject(repoName, path)
     override val changeSets: List<ChangeSet>
         get() = kotlin.runCatching {
             git.use { git -> return if (!firstParentOnly) getAllCommits(git) else firstParentsOnly(git) }
         }.getOrElse { throw RuntimeException("error in getChangeSets for $path", it) }
 
-    /** Constructor, initializes the repository with given path and options */
-    protected constructor() : this("")
-
-    constructor(path: String, firstParentOnly: Boolean = false, vcsDataBase: VCSDataBase? = null) {
+    init {
         log.debug("Creating a GitRepository from path $path")
-        this.path = path
         this.vcsDataBase = vcsDataBase ?:  VCSDataBase("$path/repository.db")
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
         repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
-        val projectId = vcsDataBase?.getProjectId(repoName, path) ?: vcsDataBase?.insertProject(repoName, path)
-        this.firstParentOnly = firstParentOnly
         maxNumberFilesInACommit = checkMaxNumberOfFiles()
         maxSizeOfDiff = checkMaxSizeOfDiff()
     }
@@ -244,7 +236,7 @@ open class GitRepository : SCM {
         return Modification(oldPath, newPath, change, diffText, sourceCode)
     }
 
-    private fun diffsForTheCommit(repo: Repository, commit: RevCommit): List<DiffEntry>? {
+    private fun diffsForTheCommit(repo: Repository, commit: RevCommit): List<DiffEntry> {
         val currentCommit: AnyObjectId = repo.resolve(commit.name)
         val parentCommit: AnyObjectId? = if (commit.parentCount > 0) repo.resolve(commit.getParent(0).name) else null
 
@@ -363,11 +355,11 @@ open class GitRepository : SCM {
     override val developerInfo get() = getDeveloperInfo(null)
 
     override fun dbPrepared() =
-        GitRepositoryUtil.dbPrepared(git, vcsDataBase!!, projectId!!, filePathMap, developersMap)
+        GitRepositoryUtil.dbPrepared(git, vcsDataBase, projectId!!, filePathMap, developersMap)
 
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> {
         return GitRepositoryUtil.
-        getDeveloperInfo(git, vcsDataBase!!, projectId!!, filePathMap, developersMap, path, nodePath, files())
+        getDeveloperInfo(git, vcsDataBase, projectId!!, filePathMap, developersMap, path, nodePath, files())
     }
 
     override fun getCommitFromTag(tag: String): String =
@@ -407,7 +399,7 @@ open class GitRepository : SCM {
     override fun clone(dest: Path): SCM {
         log.info("Cloning to $dest")
         RDFileUtils.copyDirTree(Paths.get(path), dest)
-        return GitRepository(dest.toString())
+        return GitRepository(dest.toString(), repoName= repoName)
     }
 
     override fun delete() {

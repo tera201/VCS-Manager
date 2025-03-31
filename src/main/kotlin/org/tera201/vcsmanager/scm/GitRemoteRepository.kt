@@ -34,24 +34,16 @@ class GitRemoteRepository(
     private val username: String? = null,
     private val password: String? = null,
     dataBase: VCSDataBase? = null
-) : GitRepository() {
+) : GitRepository(
+    repoName = repoNameFromURI(uri),
+    vcsDataBase = dataBase) {
     private var hasLocalState = false
     private var destinationPath: Path =
         Paths.get(destination?.let { "$it/$repoName" } ?: (getTempPath() + "-" + repoName))
-    override var projectId: Int? = null
     private var bareClone = bare
 
     init {
         try {
-            repoName = repoNameFromURI(uri)
-            dataBase?.let {
-                projectId = it.getProjectId(repoName, destinationPath.toString()) ?: it.insertProject(
-                    repoName,
-                    destinationPath.toString()
-                )
-                vcsDataBase = dataBase
-            }
-
             if (exists(destinationPath)) {
                 throw VCSException("Error, path $destinationPath already exists")
             }
@@ -89,7 +81,7 @@ class GitRemoteRepository(
     override fun clone(dest: Path): SCM = runCatching {
         log.info("Cloning $uri to $dest")
         cloneGitRepository(uri, dest, bareClone)
-        return GitRepository(dest.toString())
+        return GitRepository(path = PathUtils.fullPath(dest.toString()), repoName = repoName)
     }.getOrElse { throw VCSException("Clone failed: $it") }
 
     override fun delete() {
@@ -105,7 +97,7 @@ class GitRemoteRepository(
     }
 
     companion object {
-        const val URL_SUFFIX: String = ".git"
+        private const val URL_SUFFIX: String = ".git"
 
         private val log: Logger = LoggerFactory.getLogger(GitRemoteRepository::class.java)
 
