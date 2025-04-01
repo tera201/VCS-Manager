@@ -15,21 +15,14 @@ abstract class SQLiteCommon(url:String) {
     private val log: Logger = LoggerFactory.getLogger(SQLiteCommon::class.java)
 
     init {
-        try {
-            Class.forName("org.sqlite.JDBC") // Explicitly load SQLite driver
-        } catch (e: ClassNotFoundException) {
-            throw RuntimeException("SQLite JDBC driver not found!", e)
-        }
+        runCatching { Class.forName("org.sqlite.JDBC") }
+            .onFailure { throw RuntimeException("SQLite JDBC driver not found!", it) }
         conn = createDatabaseConnection("jdbc:sqlite:$url")
     }
 
-    protected fun createDatabaseConnection(dbUrl: String): Connection {
-        return try {
-            DriverManager.getConnection(dbUrl).also { enableForeignKeys(it) }.also { createTables() }
-        } catch (e: SQLException) {
-            throw RuntimeException("Error connecting to the database: ${e.message}", e)
-        }
-    }
+    protected fun createDatabaseConnection(dbUrl: String): Connection =
+        runCatching { DriverManager.getConnection(dbUrl).also { enableForeignKeys(it) } }
+            .getOrElse { throw RuntimeException("Error connecting to the database: ${it.message}", it) }
 
     fun closeConnection() {
         conn.close()

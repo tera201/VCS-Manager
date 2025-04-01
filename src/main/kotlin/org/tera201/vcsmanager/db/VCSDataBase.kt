@@ -13,6 +13,108 @@ import java.util.*
 
 class VCSDataBase(val url:String): SQLiteCommon(url) {
 
+    override val tableCreationQueries = mapOf(
+        "Projects" to """
+        CREATE TABLE IF NOT EXISTS Projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            filePath TEXT NOT NULL,
+            UNIQUE (name, filePath) 
+        );
+    """.trimIndent(),
+
+        "Authors" to """
+        CREATE TABLE IF NOT EXISTS Authors (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            projectId INTEGER NOT NULL,
+            FOREIGN KEY (projectId) REFERENCES Projects(id),
+            UNIQUE (email, projectId) 
+        );
+    """.trimIndent(),
+
+        "Commits" to """
+        CREATE TABLE IF NOT EXISTS Commits (
+            hash TEXT PRIMARY KEY,
+            date INTEGER NOT NULL,
+            projectSize LONG,
+            projectId INTEGER NOT NULL,
+            authorId TEXT NOT NULL,
+            stability DOUBLE NOT NULL,
+            filesAdded INTEGER NOT NULL,
+            filesDeleted INTEGER NOT NULL,
+            filesModified INTEGER NOT NULL,
+            linesAdded INTEGER NOT NULL,
+            linesDeleted INTEGER NOT NULL,
+            linesModified INTEGER NOT NULL,
+            changes INTEGER NOT NULL,
+            changesSize INTEGER NOT NULL,
+            FOREIGN KEY (projectId) REFERENCES Projects(id),
+            FOREIGN KEY (authorId) REFERENCES Authors(id),
+            UNIQUE (hash, projectId)
+        );
+    """.trimIndent(),
+
+        "Files" to """
+        CREATE TABLE IF NOT EXISTS Files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            projectId INTEGER NOT NULL,
+            filePathId INTEGER NOT NULL,
+            hash TEXT,
+            date INTEGER NOT NULL,
+            FOREIGN KEY (projectId) REFERENCES Projects(id),
+            FOREIGN KEY (filePathId) REFERENCES FilePath(id),
+            FOREIGN KEY (hash) REFERENCES Commits(hash)
+        );
+    """.trimIndent(),
+
+        "FilePath" to """
+        CREATE TABLE IF NOT EXISTS FilePath (
+            id INTEGER PRIMARY KEY,
+            projectId INTEGER NOT NULL,
+            filePath TEXT NOT NULL,
+            FOREIGN KEY (projectId) REFERENCES Projects(id),
+            UNIQUE (projectId, filePath)
+        );
+    """.trimIndent(),
+
+        "BlameFiles" to """
+        CREATE TABLE IF NOT EXISTS BlameFiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            projectId TEXT NOT NULL,
+            filePathId TEXT NOT NULL,
+            fileHash TEXT NOT NULL,
+            lineSize LONG,
+            FOREIGN KEY (projectId) REFERENCES Projects(id),
+            FOREIGN KEY (filePathId) REFERENCES FilePath(id),
+            FOREIGN KEY (fileHash) REFERENCES Commits(hash),
+            UNIQUE (projectId, filePathId, fileHash) 
+        );
+    """.trimIndent(),
+
+        "Blames" to """
+        CREATE TABLE IF NOT EXISTS Blames (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            projectId INT NOT NULL,
+            authorId TEXT NOT NULL,
+            blameFileId INT NOT NULL,
+            blameHashes TEXT NOT NULL,
+            lineIds TEXT NOT NULL,
+            lineCounts LONG NOT NULL,
+            lineSize LONG NOT NULL,
+            FOREIGN KEY (projectId) REFERENCES Projects(id),
+            FOREIGN KEY (blameHashes) REFERENCES Commits(hash),
+            FOREIGN KEY (authorId) REFERENCES Authors(id),
+            UNIQUE (projectId, authorId, BlameFileId) 
+        );
+    """.trimIndent()
+    )
+
+    init {
+        createTables()
+    }
+
     fun insertProject(name: String, filePath: String):Int {
         val sql = "INSERT OR IGNORE INTO Projects(name, filePath) VALUES(?, ?)"
         return if (executeUpdate(sql, name, filePath)) getLastInsertId() else -1
@@ -215,102 +317,4 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
         }
         return jsonString
     }
-
-    override val tableCreationQueries = mapOf(
-        "Projects" to """
-        CREATE TABLE IF NOT EXISTS Projects (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            filePath TEXT NOT NULL,
-            UNIQUE (name, filePath) 
-        );
-    """.trimIndent(),
-
-        "Authors" to """
-        CREATE TABLE IF NOT EXISTS Authors (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            projectId INTEGER NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            UNIQUE (email, projectId) 
-        );
-    """.trimIndent(),
-
-        "Commits" to """
-        CREATE TABLE IF NOT EXISTS Commits (
-            hash TEXT PRIMARY KEY,
-            date INTEGER NOT NULL,
-            projectSize LONG,
-            projectId INTEGER NOT NULL,
-            authorId TEXT NOT NULL,
-            stability DOUBLE NOT NULL,
-            filesAdded INTEGER NOT NULL,
-            filesDeleted INTEGER NOT NULL,
-            filesModified INTEGER NOT NULL,
-            linesAdded INTEGER NOT NULL,
-            linesDeleted INTEGER NOT NULL,
-            linesModified INTEGER NOT NULL,
-            changes INTEGER NOT NULL,
-            changesSize INTEGER NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (authorId) REFERENCES Authors(id),
-            UNIQUE (hash, projectId)
-        );
-    """.trimIndent(),
-
-        "Files" to """
-        CREATE TABLE IF NOT EXISTS Files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            projectId INTEGER NOT NULL,
-            filePathId INTEGER NOT NULL,
-            hash TEXT,
-            date INTEGER NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (filePathId) REFERENCES FilePath(id),
-            FOREIGN KEY (hash) REFERENCES Commits(hash)
-        );
-    """.trimIndent(),
-
-        "FilePath" to """
-        CREATE TABLE IF NOT EXISTS FilePath (
-            id INTEGER PRIMARY KEY,
-            projectId INTEGER NOT NULL,
-            filePath TEXT NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            UNIQUE (projectId, filePath)
-        );
-    """.trimIndent(),
-
-        "BlameFiles" to """
-        CREATE TABLE IF NOT EXISTS BlameFiles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            projectId TEXT NOT NULL,
-            filePathId TEXT NOT NULL,
-            fileHash TEXT NOT NULL,
-            lineSize LONG,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (filePathId) REFERENCES FilePath(id),
-            FOREIGN KEY (fileHash) REFERENCES Commits(hash),
-            UNIQUE (projectId, filePathId, fileHash) 
-        );
-    """.trimIndent(),
-
-        "Blames" to """
-        CREATE TABLE IF NOT EXISTS Blames (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            projectId INT NOT NULL,
-            authorId TEXT NOT NULL,
-            blameFileId INT NOT NULL,
-            blameHashes TEXT NOT NULL,
-            lineIds TEXT NOT NULL,
-            lineCounts LONG NOT NULL,
-            lineSize LONG NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (blameHashes) REFERENCES Commits(hash),
-            FOREIGN KEY (authorId) REFERENCES Authors(id),
-            UNIQUE (projectId, authorId, BlameFileId) 
-        );
-    """.trimIndent()
-    )
 }
