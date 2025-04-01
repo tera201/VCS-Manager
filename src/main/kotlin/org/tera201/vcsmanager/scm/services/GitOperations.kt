@@ -1,8 +1,9 @@
-package org.tera201.vcsmanager.scm
+package org.tera201.vcsmanager.scm.services
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ListBranchCommand
 import org.eclipse.jgit.api.ResetCommand
+import org.eclipse.jgit.diff.DiffEntry
 import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.lib.ObjectId
 import org.eclipse.jgit.lib.Ref
@@ -10,15 +11,20 @@ import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.revwalk.RevSort
 import org.eclipse.jgit.revwalk.RevWalk
-import org.tera201.vcsmanager.VCSException
+import org.tera201.vcsmanager.scm.exceptions.VCSException
 import org.tera201.vcsmanager.domain.ChangeSet
+import org.tera201.vcsmanager.domain.Commit
+import org.tera201.vcsmanager.scm.CollectConfiguration
+import org.tera201.vcsmanager.scm.FirstParentFilter
 import org.tera201.vcsmanager.scm.exceptions.CheckoutException
 import java.io.File
 import java.util.*
 import java.util.stream.Collectors
 
 class GitOperations(var path:String) {
+    //TODO should be singleton
     private var collectConfig: CollectConfiguration = CollectConfiguration().everything()
+    private val diffService: DiffService = DiffService(this)
     val git: Git get() = runCatching { Git.open(File(path)) }
             .getOrElse { throw VCSException("Failed to open Git repository at $path") }
 
@@ -29,6 +35,18 @@ class GitOperations(var path:String) {
             ChangeSet(revCommit.name, convertToDate(revCommit))
         }.getOrElse { throw RuntimeException("Error in getHead() for $path", it) }
     }
+
+    fun getLastCommit(): ChangeSet = git.use { git ->
+        runCatching {
+            val lastCommit = git.log().setMaxCount(1).call().first()
+            val revCommit = RevWalk(git.repository).parseCommit(lastCommit)
+            ChangeSet(revCommit.name, convertToDate(revCommit))
+        }.getOrElse { throw RuntimeException("Error in getHead() for $path", it) }
+    }
+
+    fun getOrigin(): String = runCatching {
+        git.repository.config.getString("remote", "origin", "url")
+    }.getOrElse { throw RuntimeException("Couldn't get origin for repo: $path") }
 
     private fun convertToDate(revCommit: RevCommit): GregorianCalendar = GregorianCalendar().apply {
         timeZone = TimeZone.getTimeZone(revCommit.authorIdent.zoneId)
@@ -108,7 +126,6 @@ class GitOperations(var path:String) {
         }
     }
 
-
     fun createCommit(message: String) {
         git.use { git ->
             runCatching {
@@ -131,16 +148,55 @@ class GitOperations(var path:String) {
         }
     }
 
-    fun getMainBranchName(git: Git): String = git.repository.branch
+    fun getMainBranchName(): String = git.use { git ->
+        runCatching { git.repository.branch }.getOrElse { throw VCSException("Failure in getMainBranchName()") }
+    }
+
+    /** Get the commit with this commit id. */
+    fun getCommit(id: String): Commit? = git.use { git ->
+        runCatching {
+            val repo = git.repository
+            val jgitCommit = git.log().add(repo.resolve(id)).call().firstOrNull() ?: return null
+
+            /* Extract metadata. */
+            val msg = if (collectConfig.isCollectingCommitMessages) jgitCommit.fullMessage.trim() else ""
+            val branches = getBranchesForHash(git, jgitCommit.name)
+            val isCommitInMainBranch = branches.contains(this.getMainBranchName())
+
+            /* Create one of our Commit's based on the jgitCommit metadata. */
+            val commit = Commit(jgitCommit, msg, branches, isCommitInMainBranch)
+
+            /* Convert each of the associated DiffEntry's to a Modification. */
+            val diffsForTheCommit = diffService.diffsForTheCommit(repo, jgitCommit)
+            val maxNumberFilesInACommit = PropertyService.getMaxNumberOfFiles()
+            if (diffsForTheCommit.size > maxNumberFilesInACommit) {
+                throw VCSException("Commit $id touches more than $maxNumberFilesInACommit files")
+            }
+
+            diffsForTheCommit
+                .filter { diffService.diffFiltersAccept(it) }
+                .map { diffService.diffToModification(repo, it) }
+                .forEach { commit.modifications.add(it) }
+
+            commit
+        }.getOrElse { throw RuntimeException("Error detailing $id in $path", it) }
+    }
 
     @Synchronized
     fun reset() {
         git.use { git ->
-            runCatching { git.checkout().setName(getMainBranchName(git)).setForced(true).call() }.onFailure { it.printStackTrace() }
+            runCatching { git.checkout().setName(getMainBranchName()).setForced(true).call() }.onFailure { it.printStackTrace() }
         }
     }
 
-
+    fun getSourceCode(repo: Repository, diff: DiffEntry): String {
+        if (!collectConfig.isCollectingSourceCode) return ""
+        return runCatching {
+            val reader = repo.newObjectReader()
+            val bytes = reader.open(diff.newId.toObjectId()).bytes
+            String(bytes, charset("utf-8"))
+        }.getOrElse { throw RuntimeException("Failure in getSourceCode()", it) }
+    }
 
     fun getCommitByTag(tag: String): String =
         git.use { git ->

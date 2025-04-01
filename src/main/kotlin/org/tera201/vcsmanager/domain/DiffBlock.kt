@@ -1,6 +1,6 @@
 package org.tera201.vcsmanager.domain
 
-import org.tera201.vcsmanager.VCSException
+import org.tera201.vcsmanager.scm.exceptions.VCSException
 import java.util.regex.Pattern
 
 class DiffBlock(val diffBlock: String) {

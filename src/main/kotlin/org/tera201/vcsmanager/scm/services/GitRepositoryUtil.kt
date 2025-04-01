@@ -1,4 +1,4 @@
-package org.tera201.vcsmanager.scm
+package org.tera201.vcsmanager.scm.services
 
 import kotlinx.coroutines.*
 import org.eclipse.jgit.api.Git
@@ -11,6 +11,7 @@ import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.util.io.DisabledOutputStream
+import org.tera201.vcsmanager.scm.RepositoryFile
 import org.tera201.vcsmanager.scm.entities.DeveloperInfo
 import org.tera201.vcsmanager.util.BlameEntity
 import org.tera201.vcsmanager.util.VCSDataBase

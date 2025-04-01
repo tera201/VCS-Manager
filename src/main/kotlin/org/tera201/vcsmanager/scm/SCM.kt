@@ -89,7 +89,7 @@ interface SCM {
      * Configures which data should be extracted from the repository.
      * Default behavior should be to collect *everything*.
      */
-    fun setDataToCollect(config: CollectConfiguration)
+    var collectConfig: CollectConfiguration
 
     /** Prepares the database. */
     fun dbPrepared()

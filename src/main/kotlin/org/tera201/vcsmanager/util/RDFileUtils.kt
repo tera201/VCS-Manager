@@ -2,7 +2,7 @@ package org.tera201.vcsmanager.util
 
 import org.apache.commons.io.FileUtils
 import org.apache.commons.io.IOUtils
-import org.tera201.vcsmanager.VCSException
+import org.tera201.vcsmanager.scm.exceptions.VCSException
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException

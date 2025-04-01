@@ -1,4 +1,4 @@
-package org.tera201.vcsmanager
+package org.tera201.vcsmanager.scm.exceptions
 
 class VCSException : RuntimeException {
     constructor(msg: String?) : super(msg)

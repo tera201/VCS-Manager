@@ -1,4 +1,4 @@
-package org.tera201.vcsmanager.scm
+package org.tera201.vcsmanager.scm.services
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.diff.DiffFormatter
