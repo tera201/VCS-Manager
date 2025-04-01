@@ -30,10 +30,10 @@ class GitRepositoryBuilder {
     fun buildAsRemote(): GitRemoteRepository =
         GitRemoteRepository(gitUrl!!, this.tempDir, this.bare, this.username, this.password, vcsDataBase)
 
-    fun buildAsLocal(): GitRepository = GitRepository("", true, vcsDataBase)
+    fun buildAsLocal(): GitRepository = GitRepository("",  "",true, vcsDataBase)
 
     fun buildAsRemoteSCMRepository(): SCMRepository =
         GitRemoteRepository(gitUrl!!, tempDir, bare, username, password, vcsDataBase).info
 
-    fun buildAsLocalSCMRepository(): SCMRepository  = GitRepository("", true, vcsDataBase).info
+    fun buildAsLocalSCMRepository(): SCMRepository  = GitRepository("", "",true, vcsDataBase).info
 }
