@@ -4,7 +4,7 @@ import org.eclipse.jgit.lib.Ref
 import org.tera201.vcsmanager.domain.ChangeSet
 import org.tera201.vcsmanager.domain.Commit
 import org.tera201.vcsmanager.domain.Modification
-import org.tera201.vcsmanager.scm.entities.DeveloperInfo
+import org.tera201.vcsmanager.db.entities.DeveloperInfo
 import java.nio.file.Path
 
 interface SCM {

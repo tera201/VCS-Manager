@@ -1,6 +1,6 @@
 package org.tera201.vcsmanager.scm
 
-import org.tera201.vcsmanager.util.VCSDataBase
+import org.tera201.vcsmanager.db.VCSDataBase
 
 class GitRepositoryBuilder {
     private var gitUrl: String? = null

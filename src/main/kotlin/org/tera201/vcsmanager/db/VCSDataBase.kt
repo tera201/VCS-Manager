@@ -1,14 +1,17 @@
-package org.tera201.vcsmanager.util
+package org.tera201.vcsmanager.db
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.eclipse.jgit.revwalk.RevCommit
-import org.tera201.vcsmanager.scm.entities.CommitSize
-import org.tera201.vcsmanager.scm.entities.DeveloperInfo
+import org.tera201.vcsmanager.db.entities.BlameEntity
+import org.tera201.vcsmanager.db.entities.CommitEntity
+import org.tera201.vcsmanager.db.entities.CommitSize
+import org.tera201.vcsmanager.db.entities.DeveloperInfo
+import org.tera201.vcsmanager.db.entities.FileChangeEntity
 import java.util.*
 
 
-class VCSDataBase(val url:String):SQLiteCommon(url) {
+class VCSDataBase(val url:String): SQLiteCommon(url) {
 
     fun insertProject(name: String, filePath: String):Int {
         val sql = "INSERT OR IGNORE INTO Projects(name, filePath) VALUES(?, ?)"
@@ -35,7 +38,7 @@ class VCSDataBase(val url:String):SQLiteCommon(url) {
         return executeQuery(sql, projectId, email) { getIdResult(it) }
     }
 
-    fun insertCommit(projectId:Int, authorId: Long, commit:RevCommit, projectSize: Long, stability: Double, fileEntity: FileEntity):String {
+    fun insertCommit(projectId:Int, authorId: Long, commit:RevCommit, projectSize: Long, stability: Double, fileChangeEntity: FileChangeEntity):String {
         val sql = "INSERT OR IGNORE INTO Commits(projectId, authorId, hash, date, projectSize, stability, filesAdded, filesDeleted, filesModified, linesAdded, linesDeleted, linesModified, changes, changesSize) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING hash"
         return if (executeUpdateWithRetry(
                 sql,
@@ -45,7 +48,7 @@ class VCSDataBase(val url:String):SQLiteCommon(url) {
                 commit.commitTime,
                 projectSize,
                 stability,
-                *fileEntity.getSQLArgs())) commit.name else ""
+                *fileChangeEntity.getSQLArgs())) commit.name else ""
     }
 
     fun getCommit(projectId: Int, hash: String): CommitEntity? {
@@ -122,12 +125,12 @@ class VCSDataBase(val url:String):SQLiteCommon(url) {
         return if (executeUpdate(sql, projectId, filePathId, hash, date)) getLastInsertId() else -1
     }
 
-    fun insertFile(fileList: List<org.tera201.vcsmanager.scm.entities.FileEntity>) {
+    fun insertFile(fileList: List<org.tera201.vcsmanager.db.entities.FileEntity>) {
         val sql = "INSERT OR IGNORE INTO Files(projectId, filePathId, hash, date) VALUES(?, ?, ?, ?)"
         executeBatchWithRetry(sql, fileList.map { it.getSQLArgs() })
     }
 
-    fun insertFile(file: org.tera201.vcsmanager.scm.entities.FileEntity):Int {
+    fun insertFile(file: org.tera201.vcsmanager.db.entities.FileEntity):Int {
         val sql = "INSERT OR IGNORE INTO Files(projectId, filePathId, hash, date) VALUES(?, ?, ?, ?)"
         return if (executeUpdate(sql, file.projectId, file.filePathId, file.hash, file.date)) getLastInsertId() else -1
     }

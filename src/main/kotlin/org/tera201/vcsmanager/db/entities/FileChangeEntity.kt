@@ -1,6 +1,6 @@
-package org.tera201.vcsmanager.util
+package org.tera201.vcsmanager.db.entities
 
-data class FileEntity(
+data class FileChangeEntity(
     var fileAdded: Int = 0,
     var fileDeleted: Int = 0,
     var fileModified: Int = 0,
@@ -15,14 +15,14 @@ data class FileEntity(
         return arrayOf(fileAdded, fileDeleted, fileModified, linesAdded, linesDeleted, linesModified, changes, changesSize)
     }
 
-    fun add(fileEntity: FileEntity) {
-        fileAdded += fileEntity.fileAdded
-        fileDeleted += fileEntity.fileDeleted
-        fileModified += fileEntity.fileModified
-        linesAdded += fileEntity.linesAdded
-        linesDeleted += fileEntity.linesDeleted
-        linesModified += fileEntity.linesModified
-        changes += fileEntity.changes
+    fun add(fileChangeEntity: FileChangeEntity) {
+        fileAdded += fileChangeEntity.fileAdded
+        fileDeleted += fileChangeEntity.fileDeleted
+        fileModified += fileChangeEntity.fileModified
+        linesAdded += fileChangeEntity.linesAdded
+        linesDeleted += fileChangeEntity.linesDeleted
+        linesModified += fileChangeEntity.linesModified
+        changes += fileChangeEntity.changes
     }
 
     fun plus(

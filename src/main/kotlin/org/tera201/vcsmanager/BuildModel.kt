@@ -1,12 +1,11 @@
 package org.tera201.vcsmanager
 
 import org.apache.commons.io.FileUtils
-import org.eclipse.jgit.api.errors.GitAPIException
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.tera201.vcsmanager.scm.*
 import org.tera201.vcsmanager.scm.exceptions.CheckoutException
-import org.tera201.vcsmanager.util.VCSDataBase
+import org.tera201.vcsmanager.db.VCSDataBase
 import java.io.File
 import java.io.IOException
 

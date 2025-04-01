@@ -1,8 +1,8 @@
-package org.tera201.vcsmanager.util
+package org.tera201.vcsmanager.db.entities
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.tera201.vcsmanager.util.SQLiteCommon.Companion.compress
+import org.tera201.vcsmanager.db.SQLiteCommon.Companion.compress
 
 data class BlameEntity(
     val projectId: Int,

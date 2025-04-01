@@ -1,4 +1,4 @@
-package org.tera201.vcsmanager.util
+package org.tera201.vcsmanager.db.entities
 
 import java.sql.ResultSet
 
@@ -11,7 +11,7 @@ data class CommitEntity(
     val date: Int,
     val projectSize: Long,
     val stability: Double,
-    val fileEntity: FileEntity
+    val fileChangeEntity: FileChangeEntity
 ) {
     constructor(resultSet: ResultSet) : this(
         projectId = resultSet.getInt("projectId"),
@@ -22,7 +22,7 @@ data class CommitEntity(
         date = resultSet.getInt("date"),
         projectSize = resultSet.getLong("projectSize"),
         stability = resultSet.getDouble("stability"),
-        fileEntity = FileEntity(
+        fileChangeEntity = FileChangeEntity(
             fileAdded = resultSet.getInt("filesAdded"),
             fileDeleted = resultSet.getInt("filesDeleted"),
             fileModified = resultSet.getInt("filesModified"),

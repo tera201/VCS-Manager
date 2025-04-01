@@ -15,7 +15,7 @@ import org.tera201.vcsmanager.scm.exceptions.VCSException
 import org.tera201.vcsmanager.domain.ChangeSet
 import org.tera201.vcsmanager.domain.Commit
 import org.tera201.vcsmanager.scm.CollectConfiguration
-import org.tera201.vcsmanager.scm.FirstParentFilter
+import org.tera201.vcsmanager.filter.rev.FirstParentFilter
 import org.tera201.vcsmanager.scm.exceptions.CheckoutException
 import java.io.File
 import java.util.*

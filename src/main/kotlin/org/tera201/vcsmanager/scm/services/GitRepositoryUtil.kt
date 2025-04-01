@@ -12,10 +12,11 @@ import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.util.io.DisabledOutputStream
 import org.tera201.vcsmanager.scm.RepositoryFile
-import org.tera201.vcsmanager.scm.entities.DeveloperInfo
-import org.tera201.vcsmanager.util.BlameEntity
-import org.tera201.vcsmanager.util.VCSDataBase
-import org.tera201.vcsmanager.util.FileEntity
+import org.tera201.vcsmanager.db.VCSDataBase
+import org.tera201.vcsmanager.db.entities.BlameEntity
+import org.tera201.vcsmanager.db.entities.DeveloperInfo
+import org.tera201.vcsmanager.db.entities.FileEntity
+import org.tera201.vcsmanager.db.entities.FileChangeEntity
 import java.io.ByteArrayOutputStream
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -23,7 +24,13 @@ import java.util.concurrent.ConcurrentHashMap
 object GitRepositoryUtil {
     private val fileSizeCache = mutableMapOf<String, Long?>()
 
-    fun dbPrepared(git: Git, vcsDataBase: VCSDataBase, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>) {
+    fun dbPrepared(
+        git: Git,
+        vcsDataBase: VCSDataBase,
+        projectId: Int,
+        filePathMap: ConcurrentHashMap<String, Long>,
+        developersMap: ConcurrentHashMap<String, DeveloperInfo>
+    ) {
         developersMap.clear()
 
         val coroutineScope = CoroutineScope(Dispatchers.IO)
@@ -35,7 +42,7 @@ object GitRepositoryUtil {
                     async {
                         try {
                             val dbAsync = VCSDataBase(vcsDataBase.url)
-                            val fileList: MutableList<org.tera201.vcsmanager.scm.entities.FileEntity> = mutableListOf()
+                            val fileList: MutableList<FileEntity> = mutableListOf()
                             val author = commit.authorIdent
                             val authorId = authorIdCache.computeIfAbsent(author.emailAddress) { email ->
                                 vcsDataBase.getAuthorId(projectId, email)
@@ -59,7 +66,7 @@ object GitRepositoryUtil {
 
                             paths.keys.forEach { filePath ->
                                 fileList.add(
-                                    org.tera201.vcsmanager.scm.entities.FileEntity(
+                                    FileEntity(
                                         projectId, filePath, filePathMap[filePath]!!, commit.name, commit.commitTime
                                     )
                                 )
@@ -77,7 +84,16 @@ object GitRepositoryUtil {
         }
     }
 
-    fun getDeveloperInfo(git: Git, vcsDataBase: VCSDataBase, projectId: Int, filePathMap: ConcurrentHashMap<String, Long>, developersMap: ConcurrentHashMap<String, DeveloperInfo>, path:String, nodePath: String?, repositoryFiles:List<RepositoryFile>): Map<String, DeveloperInfo> {
+    fun getDeveloperInfo(
+        git: Git,
+        vcsDataBase: VCSDataBase,
+        projectId: Int,
+        filePathMap: ConcurrentHashMap<String, Long>,
+        developersMap: ConcurrentHashMap<String, DeveloperInfo>,
+        path: String,
+        nodePath: String?,
+        repositoryFiles: List<RepositoryFile>
+    ): Map<String, DeveloperInfo> {
         return runBlocking {
             git.use { git ->
                 val localPath = nodePath?.takeIf { it != path && it.startsWith(path) }
@@ -157,9 +173,9 @@ object GitRepositoryUtil {
         }
     }
 
-    fun getCommitsFiles(commit: RevCommit, git: Git): Map<String, FileEntity> {
+    fun getCommitsFiles(commit: RevCommit, git: Git): Map<String, FileChangeEntity> {
         val out = ByteArrayOutputStream()
-        val paths: MutableMap<String, FileEntity> = HashMap()
+        val paths: MutableMap<String, FileChangeEntity> = HashMap()
         DiffFormatter(out).use { diffFormatter ->
             commit.parents.firstOrNull()?.let { parent ->
                 diffFormatter.apply {
@@ -169,8 +185,8 @@ object GitRepositoryUtil {
                 }
 
                 diffFormatter.scan(parent, commit).forEach { diff ->
-                    val fileEntity = paths.getOrPut(diff.newPath) { FileEntity() }
-                    fileEntity.applyChanges(diff, diffFormatter, out.size())
+                    val fileChangeEntity = paths.getOrPut(diff.newPath) { FileChangeEntity() }
+                    fileChangeEntity.applyChanges(diff, diffFormatter, out.size())
                 }
             }
         }
@@ -243,7 +259,7 @@ object GitRepositoryUtil {
         vcsDataBase.insertBlame(blameEntities.values.toList())
     }
 
-    private fun FileEntity.applyChanges(diff: DiffEntry, diffFormatter: DiffFormatter, diffSize: Int) {
+    private fun FileChangeEntity.applyChanges(diff: DiffEntry, diffFormatter: DiffFormatter, diffSize: Int) {
         var fileAdded = 0
         var fileDeleted = 0
         var fileModified = 0

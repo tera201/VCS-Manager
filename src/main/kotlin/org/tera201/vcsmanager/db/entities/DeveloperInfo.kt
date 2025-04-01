@@ -1,12 +1,10 @@
-package org.tera201.vcsmanager.scm.entities
+package org.tera201.vcsmanager.db.entities
 
 import org.eclipse.jgit.diff.DiffEntry
 import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.diff.Edit
 import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
-import org.tera201.vcsmanager.util.CommitEntity
-import org.tera201.vcsmanager.util.FileEntity
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 
@@ -36,7 +34,7 @@ data class DeveloperInfo(
         commitEntity.authorEmail
     ) {
         commits.add(commit)
-        commitEntity.fileEntity.apply {
+        commitEntity.fileChangeEntity.apply {
             this@DeveloperInfo.changes = changes.toLong()
             this@DeveloperInfo.changesSize = changesSize.toLong()
             this@DeveloperInfo.linesAdded = linesAdded.toLong()
@@ -51,7 +49,7 @@ data class DeveloperInfo(
     fun updateByCommit(commitEntity: CommitEntity, commit: RevCommit) {
         if (!commits.contains(commit)) {
             commits.add(commit)
-            commitEntity.fileEntity.apply {
+            commitEntity.fileChangeEntity.apply {
                 this@DeveloperInfo.changes += changes.toLong()
                 this@DeveloperInfo.changesSize += changesSize.toLong()
                 this@DeveloperInfo.linesAdded += linesAdded.toLong()
@@ -64,15 +62,15 @@ data class DeveloperInfo(
         }
     }
 
-    fun processFileEntity(fileEntity: FileEntity) {
-        this.fileAdded += fileEntity.linesAdded.toLong()
-        this.fileDeleted += fileEntity.linesDeleted.toLong()
-        this.fileModified += fileEntity.linesModified.toLong()
-        this.linesAdded += fileEntity.linesAdded.toLong()
-        this.linesDeleted += fileEntity.linesDeleted.toLong()
-        this.linesModified += fileEntity.linesModified.toLong()
-        this.changes += fileEntity.changes.toLong()
-        this.changesSize += fileEntity.changesSize.toLong()
+    fun processFileEntity(fileChangeEntity: FileChangeEntity) {
+        this.fileAdded += fileChangeEntity.linesAdded.toLong()
+        this.fileDeleted += fileChangeEntity.linesDeleted.toLong()
+        this.fileModified += fileChangeEntity.linesModified.toLong()
+        this.linesAdded += fileChangeEntity.linesAdded.toLong()
+        this.linesDeleted += fileChangeEntity.linesDeleted.toLong()
+        this.linesModified += fileChangeEntity.linesModified.toLong()
+        this.changes += fileChangeEntity.changes.toLong()
+        this.changesSize += fileChangeEntity.changesSize.toLong()
     }
 
     @Throws(IOException::class)

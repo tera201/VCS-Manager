@@ -1,4 +1,4 @@
-package org.tera201.vcsmanager.scm
+package org.tera201.vcsmanager.filter.rev
 
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.revwalk.RevWalk

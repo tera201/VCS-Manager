@@ -5,10 +5,10 @@ import org.eclipse.jgit.lib.*
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.tera201.vcsmanager.domain.*
-import org.tera201.vcsmanager.scm.entities.*
+import org.tera201.vcsmanager.db.entities.*
 import org.tera201.vcsmanager.scm.services.GitOperations
 import org.tera201.vcsmanager.scm.services.GitRepositoryUtil
-import org.tera201.vcsmanager.util.VCSDataBase
+import org.tera201.vcsmanager.db.VCSDataBase
 import org.tera201.vcsmanager.util.RDFileUtils
 import java.io.File
 import java.io.IOException

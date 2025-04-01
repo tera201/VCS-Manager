@@ -1,4 +1,4 @@
-package org.tera201.vcsmanager.scm.entities
+package org.tera201.vcsmanager.db.entities
 
 data class BlamedLine(
     val lineNumber: Int,

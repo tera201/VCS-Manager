@@ -7,7 +7,7 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.tera201.vcsmanager.scm.exceptions.VCSException
-import org.tera201.vcsmanager.util.VCSDataBase
+import org.tera201.vcsmanager.db.VCSDataBase
 import org.tera201.vcsmanager.util.PathUtils
 import org.tera201.vcsmanager.util.RDFileUtils.exists
 import org.tera201.vcsmanager.util.RDFileUtils.getTempPath

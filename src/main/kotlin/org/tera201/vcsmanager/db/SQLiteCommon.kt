@@ -1,4 +1,4 @@
-package org.tera201.vcsmanager.util
+package org.tera201.vcsmanager.db
 
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
