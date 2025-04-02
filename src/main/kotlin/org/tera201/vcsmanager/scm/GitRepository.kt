@@ -1,5 +1,6 @@
 package org.tera201.vcsmanager.scm
 
+import kotlinx.coroutines.runBlocking
 import org.apache.commons.io.FileUtils
 import org.eclipse.jgit.lib.*
 import org.slf4j.Logger
@@ -9,6 +10,7 @@ import org.tera201.vcsmanager.db.entities.*
 import org.tera201.vcsmanager.scm.services.GitOperations
 import org.tera201.vcsmanager.scm.services.GitRepositoryUtil
 import org.tera201.vcsmanager.db.VCSDataBase
+import org.tera201.vcsmanager.scm.services.DiffService
 import org.tera201.vcsmanager.util.RDFileUtils
 import java.io.File
 import java.io.IOException
@@ -27,6 +29,7 @@ open class GitRepository
     override val changeSets: List<ChangeSet>
         get() = if (!firstParentOnly) gitOps.getAllCommits() else gitOps.firstParentsCommitOnly()
     private val gitOps: GitOperations = GitOperations(path)
+    private val diffService: DiffService = DiffService(gitOps)
     private val allFilesInPath: List<File> get() = RDFileUtils.getAllFilesInPath(path)
     override val totalCommits: Long get() = changeSets.size.toLong()
     override val developerInfo get() = getDeveloperInfo(null)
@@ -44,6 +47,9 @@ open class GitRepository
             SCMRepository(this, gitOps.getOrigin(), repoName, path, gitOps.getHeadCommit().id, gitOps.getLastCommit().id)
         }.getOrElse { throw RuntimeException("Couldn't create JGit instance with path $path") }
 
+    override fun getRepositorySize(all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> =
+        runBlocking {GitRepositoryUtil.repositorySize(gitOps.git, path, all, branchOrTag, filePath) }
+
     override fun createCommit(message: String) = gitOps.createCommit(message)
 
     override fun resetLastCommitsWithMessage(message: String) = gitOps.resetLastCommitsWithMessage(message)
@@ -59,7 +65,7 @@ open class GitRepository
     override fun checkoutTo(branch: String) = gitOps.checkoutBranch(branch)
 
     override fun getDiffBetweenCommits(priorCommit: String, laterCommit: String): List<Modification> =
-        getDiffBetweenCommits(priorCommit, laterCommit)
+        diffService.getDiffBetweenCommits(priorCommit, laterCommit)
 
     @Synchronized
     override fun checkout(hash: String) = gitOps.checkoutHash(hash)

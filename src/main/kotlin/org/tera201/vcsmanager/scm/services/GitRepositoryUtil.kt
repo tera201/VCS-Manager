@@ -8,21 +8,21 @@ import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.diff.Edit
 import org.eclipse.jgit.diff.RawTextComparator
 import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.lib.ObjectId
+import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.util.io.DisabledOutputStream
-import org.tera201.vcsmanager.scm.RepositoryFile
 import org.tera201.vcsmanager.db.VCSDataBase
-import org.tera201.vcsmanager.db.entities.BlameEntity
-import org.tera201.vcsmanager.db.entities.DeveloperInfo
-import org.tera201.vcsmanager.db.entities.FileEntity
-import org.tera201.vcsmanager.db.entities.FileChangeEntity
+import org.tera201.vcsmanager.db.entities.*
+import org.tera201.vcsmanager.scm.RepositoryFile
 import java.io.ByteArrayOutputStream
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.*
 
 object GitRepositoryUtil {
     private val fileSizeCache = mutableMapOf<String, Long?>()
+    var sizeCache: ConcurrentHashMap<ObjectId, Long> = ConcurrentHashMap()
 
     fun dbPrepared(
         git: Git,
@@ -232,6 +232,47 @@ object GitRepositoryUtil {
                 .ownerForFiles.add(blameResult.resultPath)
         }
 
+    }
+
+    suspend fun repositorySize(git: Git, repoPath: String, all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> {
+        return coroutineScope {
+            val localPath = filePath?.takeIf { it != repoPath && it.startsWith(repoPath) }
+                ?.substring(repoPath.length + 1)?.replace("\\", "/")
+
+            val commits = when {
+                all -> git.log().all().call()
+                branchOrTag != null && localPath != null -> git.log()
+                    .add(git.repository.exactRef(branchOrTag).objectId)
+                    .addPath(localPath).call()
+
+                localPath != null -> git.log().addPath(localPath).call()
+                else -> git.log().call()
+            }
+
+            commits.associateWith { commit ->
+                async { processCommit(commit, git.repository) }
+            }.map { (key, deferred) -> key.name to deferred.await() }.toMap()
+        }
+    }
+
+    private fun processCommit(commit: RevCommit, repository: Repository): CommitSize {
+        return CommitSize(name= commit.name, date = commit.commitTime).apply {
+            setAuthor(commit.authorIdent.name, commit.authorIdent.emailAddress)
+            runCatching {
+                TreeWalk(repository).use { treeWalk ->
+                    treeWalk.addTree(commit.tree)
+                    treeWalk.isRecursive = true
+                    while (treeWalk.next()) addFileSize(getCachedSize(treeWalk.getObjectId(0), repository))
+                }
+            }.onFailure { it.printStackTrace() }
+        }
+    }
+
+    private fun getCachedSize(objectId: ObjectId, repository: Repository): Long {
+        return sizeCache.computeIfAbsent(objectId) { oid: ObjectId ->
+            runCatching { repository.objectDatabase.open(oid).size }
+                .getOrElse { throw RuntimeException("Failed to get object size for " + oid.name, it) }
+        }
     }
 
     fun updateFileOwner(

@@ -2,8 +2,8 @@ package org.tera201.vcsmanager.scm
 
 data class SCMRepository(
     val scm: SCM, // e.g. GitHub URL
-    private val origin: String?,
-    private val repoName: String,
+    val origin: String,
+    val repoName: String,
     val path: String, // Local file system path
     val headCommit: String, // Most recent commit
     val firstCommit: String // First commit

@@ -1,6 +1,7 @@
 package org.tera201.vcsmanager.scm
 
 import org.eclipse.jgit.lib.Ref
+import org.tera201.vcsmanager.db.entities.CommitSize
 import org.tera201.vcsmanager.domain.ChangeSet
 import org.tera201.vcsmanager.domain.Commit
 import org.tera201.vcsmanager.domain.Modification
@@ -22,6 +23,8 @@ interface SCM {
 
     /** SCM metadata */
     val info: SCMRepository?
+
+    fun getRepositorySize(all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize>
 
     // ===================== Commit Operations =====================
 
