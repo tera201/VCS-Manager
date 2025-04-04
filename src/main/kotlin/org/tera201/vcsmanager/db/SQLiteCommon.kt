@@ -20,6 +20,16 @@ abstract class SQLiteCommon(url:String) {
         conn = createDatabaseConnection("jdbc:sqlite:$url")
     }
 
+    protected fun tableExists(tableName: String): Boolean {
+        val query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+        conn.prepareStatement(query).use { stmt ->
+            stmt.setString(1, tableName)
+            stmt.executeQuery().use { rs ->
+                return rs.next() // If there is a result, the table exists
+            }
+        }
+    }
+
     protected fun createDatabaseConnection(dbUrl: String): Connection =
         runCatching { DriverManager.getConnection(dbUrl).also { enableForeignKeys(it) } }
             .getOrElse { throw RuntimeException("Error connecting to the database: ${it.message}", it) }
@@ -33,8 +43,10 @@ abstract class SQLiteCommon(url:String) {
         try {
             conn.createStatement().use { stmt ->
                 for ((tableName, sqlQuery) in tableCreationQueries) {
-                    stmt.execute(sqlQuery)
-                    log.info("Table $tableName created successfully.")
+                    if (!tableExists(tableName)) {
+                        stmt.execute(sqlQuery)
+                        log.debug("Table $tableName created successfully.")
+                    }
                 }
             }
         } catch (e: SQLException) {
@@ -48,7 +60,7 @@ abstract class SQLiteCommon(url:String) {
             conn.createStatement().use { stmt ->
                 for (table in tableCreationQueries.keys) {
                     stmt.execute("DROP TABLE IF EXISTS $table")
-                    log.info("Dropped table: $table")
+                    log.debug("Dropped table: $table")
                 }
             }
         } catch (e: SQLException) {
@@ -83,7 +95,7 @@ abstract class SQLiteCommon(url:String) {
 
     /** Generic function to execute a SELECT query with retries */
     protected fun <T> executeQueryWithRetry(sql: String, vararg params: Any?, mapper: (ResultSet) -> T): T {
-        return retryTransaction { executeQuery(sql, params, mapper = mapper) }
+        return retryTransaction { executeQuery(sql, *params, mapper = mapper) }
     }
 
     /** Generic function to execute an UPDATE or INSERT query */
@@ -96,7 +108,7 @@ abstract class SQLiteCommon(url:String) {
 
     /** Generic function to execute an INSERT or UPDATE query with retries */
     protected fun executeUpdateWithRetry(sql: String, vararg params: Any?): Boolean {
-        return retryTransaction { executeUpdate(sql, params) }
+        return retryTransaction { executeUpdate(sql, *params) }
     }
 
     /** Generic function to execute a batch INSERT or UPDATE query */
@@ -148,12 +160,8 @@ abstract class SQLiteCommon(url:String) {
             try {
                 return action()
             } catch (e: SQLException) {
-                if (e.message?.contains("SQLITE_BUSY") == true) {
-                    println("Database is busy, retrying... (attempt ${attempt + 1})")
+                    log.debug("Database is busy, retrying... (attempt ${attempt + 1})")
                     Thread.sleep(100)
-                } else {
-                    throw e
-                }
             }
         }
         throw SQLException("Failed after $retries attempts due to database being busy.")
