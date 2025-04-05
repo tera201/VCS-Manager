@@ -35,6 +35,7 @@ open class GitRepository
         get() = if (!firstParentOnly) gitOps.getAllCommits() else gitOps.firstParentsCommitOnly()
     private var gitOps: GitOperations = GitOperations(path)
     private var diffService: DiffService = DiffService(gitOps)
+    private var gitRepositoryUtil: GitRepositoryUtil
     private val allFilesInPath: List<File> get() = RDFileUtils.getAllFilesInPath(path)
     override val totalCommits: Long get() = changeSets.size.toLong()
     override val developerInfo get() = getDeveloperInfo(null)
@@ -43,6 +44,7 @@ open class GitRepository
     init {
         log.debug("Creating a GitRepository from path $path")
         this.vcsDataBase = vcsDataBase ?:  VCSDataBase("$path/repository.db")
+        gitRepositoryUtil = GitRepositoryUtil(gitOps, vcsDataBase!!, projectId)
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
 //        repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
     }
@@ -53,7 +55,7 @@ open class GitRepository
         }.getOrElse { throw RuntimeException("Couldn't create JGit instance with path $path") }
 
     override fun getRepositorySize(all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> =
-        GitRepositoryUtil.repositorySize(vcsDataBase, projectId, path, filePath)
+        gitRepositoryUtil.repositorySize(path, filePath)
 
     override fun createCommit(message: String) = gitOps.createCommit(message)
 
@@ -82,12 +84,10 @@ open class GitRepository
     override fun reset() = gitOps.reset()
 
     override fun dbPrepared() =
-        runBlocking { GitRepositoryUtil.dbPrepared(gitOps.git, vcsDataBase, projectId, filePathMap, developersMap) }
+        runBlocking { gitRepositoryUtil.dbPrepared(filePathMap) }
 
-    override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> {
-        return GitRepositoryUtil.
-        getDeveloperInfo(gitOps.git, vcsDataBase, projectId, filePathMap, developersMap, path, nodePath, files())
-    }
+    override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> =
+        gitRepositoryUtil.getDeveloperInfo(filePathMap, developersMap, path, nodePath, files())
 
     override fun getCommitFromTag(tag: String): String = gitOps.getCommitByTag(tag)
 

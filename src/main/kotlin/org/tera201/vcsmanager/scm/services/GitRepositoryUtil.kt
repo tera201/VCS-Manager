@@ -18,34 +18,26 @@ import java.io.ByteArrayOutputStream
 import java.util.*
 import java.util.concurrent.*
 
-object GitRepositoryUtil {
+class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase, val projectId: Int) {
     private val fileSizeCache = mutableMapOf<String, Long?>()
 
-    suspend fun dbPrepared(
-        git: Git,
-        vcsDataBase: VCSDataBase,
-        projectId: Int,
-        filePathMap: ConcurrentHashMap<String, Long>,
-        developersMap: ConcurrentHashMap<String, DeveloperInfo>
-    ) {
-        developersMap.clear()
-
+    suspend fun dbPrepared(filePathMap: ConcurrentHashMap<String, Long>) {
         coroutineScope {
-            git.use { git ->
+            gitOps.git.use { git ->
                 val commits = git.log().call().toList()
                 println("Commits in total: ${ commits.size}")
                 val fileter = commits.filter { commit ->!vcsDataBase.isCommitExist(commit.name) && commit.parentCount == 1 }
                 println("Commit after filter: ${fileter.size}")
                 val authorIdCache = ConcurrentHashMap<String, Long>()
 
-                fileter.map { bunch ->
+                fileter.map { commit ->
                     launch(Dispatchers.Default) {
                         val dbAsync = VCSDataBase(vcsDataBase.url)
-                        val paths = getCommitsFiles(bunch, git)
+                        val paths = getCommitsFiles(commit, git)
                         withContext(Dispatchers.IO) {
-                            authorIdCache.computeIfAbsent(bunch.authorIdent.emailAddress) { email ->
+                            authorIdCache.computeIfAbsent(commit.authorIdent.emailAddress) { email ->
                                 dbAsync.getAuthorId(projectId, email)
-                                    ?: dbAsync.insertAuthor(projectId, bunch.authorIdent.name, email)!!
+                                    ?: dbAsync.insertAuthor(projectId, commit.authorIdent.name, email)!!
                             }
                             paths.keys.map { filePath ->
                                 filePathMap.computeIfAbsent(filePath) { path ->
@@ -55,18 +47,18 @@ object GitRepositoryUtil {
                             }
                         }
                         val stability =
-                            CommitStabilityAnalyzer.analyzeCommit(git, commits, bunch, commits.indexOf(bunch))
-                        val commitSize = processCommitSize(bunch, git)
+                            CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit))
+                        val commitSize = processCommitSize(commit, git)
                         if (paths.isEmpty()) return@launch
                         val fileEntity = paths.values.reduce { acc, fileEntity -> acc.add(fileEntity); acc }
-                        val authorId = authorIdCache[bunch.authorIdent.emailAddress]!!
+                        val authorId = authorIdCache[commit.authorIdent.emailAddress]!!
                         withContext(Dispatchers.IO) {
-                            dbAsync.insertCommit(projectId, authorId, bunch, commitSize, stability, fileEntity)
+                            dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
                             val fileList: MutableList<FileEntity> = mutableListOf()
                             paths.keys.forEach { filePath ->
                                 fileList.add(
                                     FileEntity(
-                                        projectId, filePath, filePathMap[filePath]!!, bunch.name, bunch.commitTime
+                                        projectId, filePath, filePathMap[filePath]!!, commit.name, commit.commitTime
                                     )
                                 )
                             }
@@ -80,9 +72,6 @@ object GitRepositoryUtil {
     }
 
     fun getDeveloperInfo(
-        git: Git,
-        vcsDataBase: VCSDataBase,
-        projectId: Int,
         filePathMap: ConcurrentHashMap<String, Long>,
         developersMap: ConcurrentHashMap<String, DeveloperInfo>,
         path: String,
@@ -90,7 +79,7 @@ object GitRepositoryUtil {
         repositoryFiles: List<RepositoryFile>
     ): Map<String, DeveloperInfo> {
         return runBlocking {
-            git.use { git ->
+            gitOps.git.use { git ->
                 val localPath = nodePath?.takeIf { it != path && it.startsWith(path) }
                     ?.substring(path.length + 1)?.replace("\\", "/")
                 val commits = if (localPath != null) git.log().addPath(localPath).call() else git.log().call()
@@ -226,7 +215,7 @@ object GitRepositoryUtil {
 
     }
 
-    fun repositorySize(vcsDataBase: VCSDataBase, projectId: Int, repoPath: String, filePath: String?): Map<String, CommitSize> {
+    fun repositorySize(repoPath: String, filePath: String?): Map<String, CommitSize> {
             val localPath = filePath?.takeIf { it != repoPath && it.startsWith(repoPath) }
                 ?.substring(repoPath.length + 1)?.replace("\\", "/") ?: ""
         return vcsDataBase.getCommitSizeMap(projectId, localPath)
