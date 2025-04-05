@@ -20,16 +20,21 @@ import java.util.concurrent.ConcurrentHashMap
 
 /* TODO Name: Sounds like it inherits SCMRepository, but it actually implements SCM. */
 open class GitRepository
-    (var path: String = "", var repoName: String, protected var firstParentOnly: Boolean = false, vcsDataBase: VCSDataBase? = null) : SCM {
+    (path: String = "", val repoName: String, protected var firstParentOnly: Boolean = false, vcsDataBase: VCSDataBase? = null) : SCM {
     private var vcsDataBase: VCSDataBase
     //TODO should be singleton
     override var collectConfig: CollectConfiguration = CollectConfiguration().everything()
+    var path: String = path
+        set(value) {
+            field = value
+            gitOps.path = value
+        }
     private val projectId: Int
         get() = vcsDataBase.getProjectId(repoName, path) ?: this.vcsDataBase.insertProject(repoName, path)
     override val changeSets: List<ChangeSet>
         get() = if (!firstParentOnly) gitOps.getAllCommits() else gitOps.firstParentsCommitOnly()
-    private val gitOps: GitOperations = GitOperations(path)
-    private val diffService: DiffService = DiffService(gitOps)
+    private var gitOps: GitOperations = GitOperations(path)
+    private var diffService: DiffService = DiffService(gitOps)
     private val allFilesInPath: List<File> get() = RDFileUtils.getAllFilesInPath(path)
     override val totalCommits: Long get() = changeSets.size.toLong()
     override val developerInfo get() = getDeveloperInfo(null)
@@ -39,7 +44,7 @@ open class GitRepository
         log.debug("Creating a GitRepository from path $path")
         this.vcsDataBase = vcsDataBase ?:  VCSDataBase("$path/repository.db")
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-        repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
+//        repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
     }
 
     override val info: SCMRepository
@@ -48,7 +53,7 @@ open class GitRepository
         }.getOrElse { throw RuntimeException("Couldn't create JGit instance with path $path") }
 
     override fun getRepositorySize(all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> =
-        runBlocking {GitRepositoryUtil.repositorySize(gitOps.git, path, all, branchOrTag, filePath) }
+        GitRepositoryUtil.repositorySize(vcsDataBase, projectId, path, filePath)
 
     override fun createCommit(message: String) = gitOps.createCommit(message)
 
@@ -77,7 +82,7 @@ open class GitRepository
     override fun reset() = gitOps.reset()
 
     override fun dbPrepared() =
-        GitRepositoryUtil.dbPrepared(gitOps.git, vcsDataBase, projectId, filePathMap, developersMap)
+        runBlocking { GitRepositoryUtil.dbPrepared(gitOps.git, vcsDataBase, projectId, filePathMap, developersMap) }
 
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> {
         return GitRepositoryUtil.

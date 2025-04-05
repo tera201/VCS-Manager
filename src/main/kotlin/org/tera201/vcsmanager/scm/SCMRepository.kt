@@ -9,9 +9,6 @@ data class SCMRepository(
     val firstCommit: String // First commit
 ) {
 
-    /** Returns the origin URL or the local path if origin is not provided. */
-    fun getOrigin(): String = origin ?: path
-
     /** Returns the last directory in the path. */
     val lastDir: String
         get() {

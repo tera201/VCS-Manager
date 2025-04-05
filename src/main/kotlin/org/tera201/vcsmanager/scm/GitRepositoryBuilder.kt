@@ -35,5 +35,6 @@ class GitRepositoryBuilder {
     fun buildAsRemoteSCMRepository(): SCMRepository =
         GitRemoteRepository(gitUrl!!, tempDir, bare, username, password, vcsDataBase).info
 
-    fun buildAsLocalSCMRepository(): SCMRepository  = GitRepository("", "",true, vcsDataBase).info
+    // TODO without tempDir GitRepository works incorrect
+    fun buildAsLocalSCMRepository(): SCMRepository  = GitRepository(tempDir!!, "",true, vcsDataBase).info
 }

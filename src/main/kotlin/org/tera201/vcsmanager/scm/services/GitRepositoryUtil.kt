@@ -8,8 +8,6 @@ import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.diff.Edit
 import org.eclipse.jgit.diff.RawTextComparator
 import org.eclipse.jgit.lib.Constants
-import org.eclipse.jgit.lib.ObjectId
-import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.util.io.DisabledOutputStream
@@ -22,9 +20,8 @@ import java.util.concurrent.*
 
 object GitRepositoryUtil {
     private val fileSizeCache = mutableMapOf<String, Long?>()
-    var sizeCache: ConcurrentHashMap<ObjectId, Long> = ConcurrentHashMap()
 
-    fun dbPrepared(
+    suspend fun dbPrepared(
         git: Git,
         vcsDataBase: VCSDataBase,
         projectId: Int,
@@ -33,53 +30,51 @@ object GitRepositoryUtil {
     ) {
         developersMap.clear()
 
-        val coroutineScope = CoroutineScope(Dispatchers.IO)
-        coroutineScope.launch {
+        coroutineScope {
             git.use { git ->
-                val commits = git.log().call().filter { commit -> !vcsDataBase.isCommitExist(commit.name) }
+                val commits = git.log().call().toList()
+                println("Commits in total: ${ commits.size}")
+                val fileter = commits.filter { commit ->!vcsDataBase.isCommitExist(commit.name) && commit.parentCount == 1 }
+                println("Commit after filter: ${fileter.size}")
                 val authorIdCache = ConcurrentHashMap<String, Long>()
-                val commitJobs = commits.map { commit ->
-                    async {
-                        try {
-                            val dbAsync = VCSDataBase(vcsDataBase.url)
-                            val fileList: MutableList<FileEntity> = mutableListOf()
-                            val author = commit.authorIdent
-                            val authorId = authorIdCache.computeIfAbsent(author.emailAddress) { email ->
-                                vcsDataBase.getAuthorId(projectId, email)
-                                    ?: dbAsync.insertAuthor(projectId, author.name, email)!!
-                            }
 
-                            val paths = getCommitsFiles(commit, git)
-                            paths.keys.forEach { filePath ->
+                fileter.map { bunch ->
+                    launch(Dispatchers.Default) {
+                        val dbAsync = VCSDataBase(vcsDataBase.url)
+                        val paths = getCommitsFiles(bunch, git)
+                        withContext(Dispatchers.IO) {
+                            authorIdCache.computeIfAbsent(bunch.authorIdent.emailAddress) { email ->
+                                dbAsync.getAuthorId(projectId, email)
+                                    ?: dbAsync.insertAuthor(projectId, bunch.authorIdent.name, email)!!
+                            }
+                            paths.keys.map { filePath ->
                                 filePathMap.computeIfAbsent(filePath) { path ->
-                                    vcsDataBase.getFilePathId(projectId, path)
-                                        ?: dbAsync.insertFilePath(projectId, path)!!
+                                    dbAsync.getFilePathId(projectId, path)
+                                        ?: dbAsync.insertFilePath(projectId, path)
                                 }
                             }
-
-                            val stability =
-                                CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit))
-                            val commitSize = processCommitSize(commit, git)
-                            val fileEntity = paths.values.reduce { acc, fileEntity -> acc.add(fileEntity); acc }
-
-                            dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
-
+                        }
+                        val stability =
+                            CommitStabilityAnalyzer.analyzeCommit(git, commits, bunch, commits.indexOf(bunch))
+                        val commitSize = processCommitSize(bunch, git)
+                        if (paths.isEmpty()) return@launch
+                        val fileEntity = paths.values.reduce { acc, fileEntity -> acc.add(fileEntity); acc }
+                        val authorId = authorIdCache[bunch.authorIdent.emailAddress]!!
+                        withContext(Dispatchers.IO) {
+                            dbAsync.insertCommit(projectId, authorId, bunch, commitSize, stability, fileEntity)
+                            val fileList: MutableList<FileEntity> = mutableListOf()
                             paths.keys.forEach { filePath ->
                                 fileList.add(
                                     FileEntity(
-                                        projectId, filePath, filePathMap[filePath]!!, commit.name, commit.commitTime
+                                        projectId, filePath, filePathMap[filePath]!!, bunch.name, bunch.commitTime
                                     )
                                 )
                             }
-
                             dbAsync.insertFile(fileList)
-                            dbAsync.closeConnection()
-                        } catch (e: Exception) {
-                            println("Error processing commit ${commit.name}: ${e.message}")
                         }
+                        dbAsync.closeConnection()
                     }
-                }
-                commitJobs.awaitAll()
+                }.joinAll()
             }
         }
     }
@@ -177,13 +172,10 @@ object GitRepositoryUtil {
         val out = ByteArrayOutputStream()
         val paths: MutableMap<String, FileChangeEntity> = HashMap()
         DiffFormatter(out).use { diffFormatter ->
+            diffFormatter.setRepository(git.repository)
+            diffFormatter.setDiffComparator(RawTextComparator.DEFAULT)
+            diffFormatter.isDetectRenames = true
             commit.parents.firstOrNull()?.let { parent ->
-                diffFormatter.apply {
-                    setRepository(git.repository)
-                    setDiffComparator(RawTextComparator.DEFAULT)
-                    isDetectRenames = true
-                }
-
                 diffFormatter.scan(parent, commit).forEach { diff ->
                     val fileChangeEntity = paths.getOrPut(diff.newPath) { FileChangeEntity() }
                     fileChangeEntity.applyChanges(diff, diffFormatter, out.size())
@@ -234,45 +226,10 @@ object GitRepositoryUtil {
 
     }
 
-    suspend fun repositorySize(git: Git, repoPath: String, all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> {
-        return coroutineScope {
+    fun repositorySize(vcsDataBase: VCSDataBase, projectId: Int, repoPath: String, filePath: String?): Map<String, CommitSize> {
             val localPath = filePath?.takeIf { it != repoPath && it.startsWith(repoPath) }
-                ?.substring(repoPath.length + 1)?.replace("\\", "/")
-
-            val commits = when {
-                all -> git.log().all().call()
-                branchOrTag != null && localPath != null -> git.log()
-                    .add(git.repository.exactRef(branchOrTag).objectId)
-                    .addPath(localPath).call()
-
-                localPath != null -> git.log().addPath(localPath).call()
-                else -> git.log().call()
-            }
-
-            commits.associateWith { commit ->
-                async { processCommit(commit, git.repository) }
-            }.map { (key, deferred) -> key.name to deferred.await() }.toMap()
-        }
-    }
-
-    private fun processCommit(commit: RevCommit, repository: Repository): CommitSize {
-        return CommitSize(name= commit.name, date = commit.commitTime).apply {
-            setAuthor(commit.authorIdent.name, commit.authorIdent.emailAddress)
-            runCatching {
-                TreeWalk(repository).use { treeWalk ->
-                    treeWalk.addTree(commit.tree)
-                    treeWalk.isRecursive = true
-                    while (treeWalk.next()) addFileSize(getCachedSize(treeWalk.getObjectId(0), repository))
-                }
-            }.onFailure { it.printStackTrace() }
-        }
-    }
-
-    private fun getCachedSize(objectId: ObjectId, repository: Repository): Long {
-        return sizeCache.computeIfAbsent(objectId) { oid: ObjectId ->
-            runCatching { repository.objectDatabase.open(oid).size }
-                .getOrElse { throw RuntimeException("Failed to get object size for " + oid.name, it) }
-        }
+                ?.substring(repoPath.length + 1)?.replace("\\", "/") ?: ""
+        return vcsDataBase.getCommitSizeMap(projectId, localPath)
     }
 
     fun updateFileOwner(
