@@ -133,11 +133,6 @@ abstract class SQLiteCommon(url:String) {
         return executeQuery(sql) { rs -> if (rs.next()) rs.getInt(1) else -1 }
     }
 
-    /** Executes a query that checks if a record exists */
-    protected fun isExistExecute(pstmt: PreparedStatement): Boolean {
-        return pstmt.executeQuery().use { rs -> rs.next() }
-    }
-
     /** Extension function to handle nullable Int values */
     protected fun PreparedStatement.setIntOrNull(index: Int, value: Int?) {
         if (value == null) setNull(index, Types.INTEGER) else setInt(index, value)

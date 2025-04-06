@@ -279,6 +279,20 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
         executeBatchWithRetry(sql, blameEntities.map { it.getSQLCompressedArgs() })
     }
 
+    fun isBlameExist(projectId: Int, blameFileId: Int): Boolean {
+        val sql = "SELECT id FROM Blames WHERE projectId = ? AND blameFileId = ?"
+        return executeQuery(sql, projectId, blameFileId) { it.next()}
+    }
+
+    fun isBlameExist(projectId: Int, filePathId: Long, fileHash: String):Boolean {
+        val sql = """
+            SELECT * FROM Blames b
+            JOIN BlameFiles bf ON bf.id = b.blameFileId AND bf.projectId = b.projectId
+            WHERE bf.projectId = ? AND bf.filePathId = ? AND bf.fileHash = ?
+            """.trimIndent()
+        return executeQuery(sql, projectId, filePathId, fileHash) { it.next() }
+    }
+
     fun getDevelopersByProjectId(projectId: Int): Map<String, Long> {
         val developers = mutableMapOf<String, Long>()
         val sql = "SELECT id, email FROM Authors WHERE projectId = ?"

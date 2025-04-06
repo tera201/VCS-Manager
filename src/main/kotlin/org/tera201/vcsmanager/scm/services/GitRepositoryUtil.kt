@@ -108,16 +108,15 @@ class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase,
                 val fileStream = repositoryFiles
                     .filter { (it.file.path.startsWith(localPath ?: "") && !it.file.path.endsWith(".DS_Store")) }
                     .map { it.file.path.substring(path.length + 1).replace("\\", "/") }
-                    .filter { filePathMap.keys.contains(it) }
-                fileStream.filter {
-                    vcsDataBase.getBlameFileId(projectId, filePathMap[it]!!, head.name) == null
-                }.forEach { vcsDataBase.insertBlameFile(projectId, filePathMap[it]!!, head.name) }
+                    .filter { filePathMap.keys.contains(it) and
+                            !vcsDataBase.isBlameExist(projectId, filePathMap[it]!!, head.name) }
+                fileStream.forEach { vcsDataBase.insertBlameFile(projectId, filePathMap[it]!!, head.name) }
                 val fileAndBlameId = fileStream.map {
                     it to vcsDataBase.getBlameFileId(projectId, filePathMap[it]!!, head.name)!!
                 }
 
                 val devs = vcsDataBase.getDevelopersByProjectId(projectId)
-                fileAndBlameId.map { (filePath, blameId) ->
+                fileAndBlameId.filter { !vcsDataBase.isBlameExist(projectId, it.second) }.map { (filePath, blameId) ->
                     launch(Dispatchers.Default) {
                         val dbAsync = VCSDataBase(vcsDataBase.url)
                         runCatching {
