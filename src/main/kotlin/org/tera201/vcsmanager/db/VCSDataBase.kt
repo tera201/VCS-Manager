@@ -36,7 +36,7 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
             date INTEGER NOT NULL,
             projectSize LONG,
             projectId INTEGER NOT NULL,
-            authorId TEXT NOT NULL,
+            authorId LONG NOT NULL,
             stability DOUBLE NOT NULL,
             filesAdded INTEGER NOT NULL,
             filesDeleted INTEGER NOT NULL,
@@ -93,7 +93,7 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
         CREATE TABLE IF NOT EXISTS Blames (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             projectId INT NOT NULL,
-            authorId TEXT NOT NULL,
+            authorId LONG NOT NULL,
             blameFileId INT NOT NULL,
             blameHashes TEXT NOT NULL,
             lineIds TEXT NOT NULL,
@@ -218,6 +218,13 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
         return executeQuery(sql, projectId, filePath) { getIdResult(it) }
     }
 
+    fun getAllFilePaths(projectId: Int): Map<String, Long> {
+        val filePaths = mutableMapOf<String, Long>()
+        val sql = "SELECT id, filePath FROM FilePath WHERE projectId = ?"
+        executeQuery(sql, projectId) {rs -> while (rs.next()) filePaths[rs.getString("filePath")] = rs.getLong("id") }
+        return filePaths
+    }
+
     fun insertFile(projectId: Int, filePathId: Long, hash: String, date: Int):Int {
         val sql = "INSERT OR IGNORE INTO Files(projectId, filePathId, hash, date) VALUES(?, ?, ?, ?)"
         return if (executeUpdate(sql, projectId, filePathId, hash, date)) getLastInsertId() else -1
@@ -233,13 +240,13 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
         return if (executeUpdate(sql, file.projectId, file.filePathId, file.hash, file.date)) getLastInsertId() else -1
     }
 
-    fun updateBlameFileSize(blameFileId: Int) {
+    fun updateBlameLineSize(blameFileId: Int) {
         val sql = """
             UPDATE BlameFiles 
             SET lineSize = (SELECT SUM(lineSize) FROM Blames WHERE blameFileId = ? GROUP BY projectId AND blameFileId) 
             WHERE id = ?
         """.trimIndent()
-        executeUpdate(sql, blameFileId, blameFileId)
+        executeUpdateWithRetry(sql, blameFileId, blameFileId)
     }
 
     fun getBlameFileId(projectId: Int, filePathId: Long, fileHash: String):Int? {
@@ -274,11 +281,11 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
         executeBatchWithRetry(sql, blameEntities.map { it.getSQLCompressedArgs() })
     }
 
-    fun getDevelopersByProjectId(projectId: Int): Map<String, String> {
-        val developers = mutableMapOf<String, String>()
+    fun getDevelopersByProjectId(projectId: Int): Map<String, Long> {
+        val developers = mutableMapOf<String, Long>()
         val sql = "SELECT id, email FROM Authors WHERE projectId = ?"
         executeQuery(sql, projectId) { rs ->
-            while (rs.next()) developers[rs.getString("email")] = rs.getString("id")
+            while (rs.next()) developers[rs.getString("email")] = rs.getLong("id")
         }
         return developers
     }

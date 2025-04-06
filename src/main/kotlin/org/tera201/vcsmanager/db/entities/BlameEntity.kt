@@ -2,13 +2,12 @@ package org.tera201.vcsmanager.db.entities
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.tera201.vcsmanager.db.SQLiteCommon.Companion.compress
 
 data class BlameEntity(
     val projectId: Int,
-    val authorId: String,
+    val authorId: Long,
     val blameFileId: Int,
-    val blameHashes: MutableList<String>,
+    val blameHash: String,
     val lineIds: MutableList<Int>,
     var lineSize: Long
 ) {
@@ -16,16 +15,16 @@ data class BlameEntity(
             projectId,
             authorId,
             blameFileId,
-            convertListToJson(blameHashes),
+            blameHash,
             convertListToJson(lineIds),
             lineIds.size.toLong(),
             lineSize)
 
     fun getSQLCompressedArgs(): Array<Any> =arrayOf(
         projectId,
-        authorId,
+        authorId.toLong(),
         blameFileId,
-        compress(convertListToJson(blameHashes)),
+        blameHash,
         convertListToJson(lineIds),
         lineIds.size.toLong(),
         lineSize)

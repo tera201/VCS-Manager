@@ -87,7 +87,7 @@ open class GitRepository
         runBlocking { gitRepositoryUtil.dbPrepared(filePathMap) }
 
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> =
-        gitRepositoryUtil.getDeveloperInfo(filePathMap, developersMap, path, nodePath, files())
+        runBlocking { gitRepositoryUtil.getDeveloperInfo(filePathMap, developersMap, path, nodePath, files()) }
 
     override fun getCommitFromTag(tag: String): String = gitOps.getCommitByTag(tag)
 

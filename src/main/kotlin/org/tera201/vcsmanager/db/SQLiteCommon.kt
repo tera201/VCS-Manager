@@ -155,13 +155,15 @@ abstract class SQLiteCommon(url:String) {
         return ""
     }
 
-    protected fun <T> retryTransaction(retries: Int = 10, action: () -> T): T {
+    protected fun <T> retryTransaction(retries: Int = 30, action: () -> T): T {
         repeat(retries) { attempt ->
             try {
                 return action()
             } catch (e: SQLException) {
                     log.debug("Database is busy, retrying... (attempt ${attempt + 1})")
-                    Thread.sleep(100)
+                    if (!e.message!!.contains("SQLITE_BUSY"))
+                        throw RuntimeException("Retry transaction fail: ${e.message}")
+                    Thread.sleep(retries * 5L)
             }
         }
         throw SQLException("Failed after $retries attempts due to database being busy.")

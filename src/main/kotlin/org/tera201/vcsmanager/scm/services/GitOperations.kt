@@ -26,7 +26,7 @@ class GitOperations(var path:String) {
     private var collectConfig: CollectConfiguration = CollectConfiguration().everything()
     private val diffService: DiffService = DiffService(this)
     val git: Git get() = runCatching { Git.open(File(path)) }
-            .getOrElse { throw VCSException("Failed to open Git repository at $path") }
+            .getOrElse { throw VCSException("Failed to open Git repository at $path. ${it.message}") }
 
     fun getHeadCommit(): ChangeSet = git.use { git ->
         runCatching {
