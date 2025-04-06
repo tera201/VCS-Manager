@@ -8,7 +8,6 @@ import org.eclipse.jgit.diff.RawTextComparator
 import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.treewalk.TreeWalk
-import org.eclipse.jgit.util.io.DisabledOutputStream
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.tera201.vcsmanager.db.VCSDataBase
@@ -123,7 +122,7 @@ class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase,
                         val dbAsync = VCSDataBase(vcsDataBase.url)
                         runCatching {
                             git.blame().setFilePath(filePath).setStartCommit(head).call()?.let {
-                                updateFileOwner(it, devs, dbAsync, projectId, blameId, head.name)
+                                updateFileOwner(it, devs, dbAsync, projectId, blameId)
                             }
                             dbAsync.updateBlameLineSize(blameId)
                         }.onFailure { it.printStackTrace() }
@@ -134,22 +133,6 @@ class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase,
                 vcsDataBase.developerUpdateByBlameInfo(projectId, developersMap)
             }
             developersMap
-        }
-    }
-
-    fun analyzeCommit(commit: RevCommit, git: Git, dev: DeveloperInfo) {
-        DiffFormatter(DisabledOutputStream.INSTANCE).use { diffFormatter ->
-            commit.parents[0]?.let { parent ->
-                diffFormatter.apply {
-                    setRepository(git.repository)
-                    setDiffComparator(RawTextComparator.DEFAULT)
-                    isDetectRenames = true
-                }
-
-                diffFormatter.scan(parent, commit).forEach { diff ->
-                    dev.processDiff(diff, git.repository)
-                }
-            }
         }
     }
 
@@ -197,14 +180,13 @@ class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase,
         dataBase: VCSDataBase,
         projectId: Int,
         blameFileId: Int,
-        headHash: String
     ) {
         val blameEntities = mutableMapOf<String, BlameEntity>()
         for (i in 0..<blameResult.resultContents.size()) {
             val author = blameResult.getSourceAuthor(i)
             val lineSize = blameResult.resultContents.getString(i).toByteArray().size.toLong()
             blameEntities.computeIfAbsent(author.emailAddress) {
-                BlameEntity(projectId, devs[it] ?: -1, blameFileId, headHash, mutableListOf(), 0)
+                BlameEntity(projectId, devs[it] ?: -1, blameFileId, mutableListOf(), 0)
             }.apply {
                 lineIds.add(i)
                 this.lineSize += lineSize

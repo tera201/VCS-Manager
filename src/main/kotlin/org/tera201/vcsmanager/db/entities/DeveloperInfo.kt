@@ -1,12 +1,6 @@
 package org.tera201.vcsmanager.db.entities
 
-import org.eclipse.jgit.diff.DiffEntry
-import org.eclipse.jgit.diff.DiffFormatter
-import org.eclipse.jgit.diff.Edit
-import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
-import java.io.ByteArrayOutputStream
-import java.io.IOException
 
 
 data class DeveloperInfo(
@@ -60,59 +54,5 @@ data class DeveloperInfo(
                 this@DeveloperInfo.fileModified += fileModified.toLong()
             }
         }
-    }
-
-    fun processFileEntity(fileChangeEntity: FileChangeEntity) {
-        this.fileAdded += fileChangeEntity.linesAdded.toLong()
-        this.fileDeleted += fileChangeEntity.linesDeleted.toLong()
-        this.fileModified += fileChangeEntity.linesModified.toLong()
-        this.linesAdded += fileChangeEntity.linesAdded.toLong()
-        this.linesDeleted += fileChangeEntity.linesDeleted.toLong()
-        this.linesModified += fileChangeEntity.linesModified.toLong()
-        this.changes += fileChangeEntity.changes.toLong()
-        this.changesSize += fileChangeEntity.changesSize.toLong()
-    }
-
-    @Throws(IOException::class)
-    fun processDiff(diff: DiffEntry, repository: Repository?) {
-        val out = ByteArrayOutputStream()
-
-
-        when (diff.changeType) {
-            DiffEntry.ChangeType.ADD -> {this.authorForFiles.add(diff.newPath); fileAdded++}
-            DiffEntry.ChangeType.DELETE -> fileDeleted++
-            DiffEntry.ChangeType.MODIFY -> fileModified++
-            DiffEntry.ChangeType.RENAME -> TODO()
-            DiffEntry.ChangeType.COPY -> TODO()
-        }
-        DiffFormatter(out).use { diffFormatter ->
-            diffFormatter.setRepository(repository)
-            diffFormatter.isDetectRenames = true
-            diffFormatter.format(diff)
-
-            val editList = diffFormatter.toFileHeader(diff).toEditList()
-            for (edit in editList) {
-                when (edit.type) {
-                    Edit.Type.INSERT -> {
-                        linesAdded += edit.lengthB.toLong()
-                        changes += edit.lengthB.toLong()
-                    }
-
-                    Edit.Type.DELETE -> {
-                        linesDeleted += edit.lengthA.toLong()
-                        changes += edit.lengthA.toLong()
-                    }
-
-                    Edit.Type.REPLACE -> {
-                        //TODO getLengthA (removed)  getLengthB (added) - maybe max(A,B) or just B
-                        linesModified += (edit.lengthA + edit.lengthB).toLong()
-                        changes += (edit.lengthA + edit.lengthB).toLong()
-                    }
-
-                    Edit.Type.EMPTY -> TODO()
-                }
-            }
-        }
-        changesSize += out.size().toLong()
     }
 }

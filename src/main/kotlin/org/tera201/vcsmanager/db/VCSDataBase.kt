@@ -95,12 +95,10 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
             projectId INT NOT NULL,
             authorId LONG NOT NULL,
             blameFileId INT NOT NULL,
-            blameHashes TEXT NOT NULL,
             lineIds TEXT NOT NULL,
             lineCounts LONG NOT NULL,
             lineSize LONG NOT NULL,
             FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (blameHashes) REFERENCES Commits(hash),
             FOREIGN KEY (authorId) REFERENCES Authors(id),
             UNIQUE (projectId, authorId, BlameFileId) 
         );
@@ -272,12 +270,12 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
     }
 
     fun insertBlame(blameEntity: BlameEntity) {
-        val sql = "INSERT OR IGNORE INTO Blames(projectId, authorId, blameFileId, blameHashes, lineIds, lineCounts, lineSize) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val sql = "INSERT OR IGNORE INTO Blames(projectId, authorId, blameFileId, lineIds, lineCounts, lineSize) VALUES(?, ?, ?, ?, ?, ?)"
         executeUpdate(sql, blameEntity.getSQLArgs())
     }
 
     fun insertBlame(blameEntities: List<BlameEntity>) {
-        val sql = "INSERT OR IGNORE INTO Blames(projectId, authorId, blameFileId, blameHashes, lineIds, lineCounts, lineSize) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val sql = "INSERT OR IGNORE INTO Blames(projectId, authorId, blameFileId, lineIds, lineCounts, lineSize) VALUES(?, ?, ?, ?, ?, ?)"
         executeBatchWithRetry(sql, blameEntities.map { it.getSQLCompressedArgs() })
     }
 

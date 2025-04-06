@@ -7,7 +7,6 @@ data class BlameEntity(
     val projectId: Int,
     val authorId: Long,
     val blameFileId: Int,
-    val blameHash: String,
     val lineIds: MutableList<Int>,
     var lineSize: Long
 ) {
@@ -15,16 +14,14 @@ data class BlameEntity(
             projectId,
             authorId,
             blameFileId,
-            blameHash,
             convertListToJson(lineIds),
             lineIds.size.toLong(),
             lineSize)
 
     fun getSQLCompressedArgs(): Array<Any> =arrayOf(
         projectId,
-        authorId.toLong(),
+        authorId,
         blameFileId,
-        blameHash,
         convertListToJson(lineIds),
         lineIds.size.toLong(),
         lineSize)

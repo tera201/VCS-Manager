@@ -160,9 +160,9 @@ abstract class SQLiteCommon(url:String) {
             try {
                 return action()
             } catch (e: SQLException) {
-                    log.debug("Database is busy, retrying... (attempt ${attempt + 1})")
-                    if (!e.message!!.contains("SQLITE_BUSY"))
-                        throw RuntimeException("Retry transaction fail: ${e.message}")
+                    if (e.message!!.contains("SQLITE_BUSY"))
+                        log.debug("Database is busy, retrying... (attempt ${attempt + 1})")
+                    else throw RuntimeException("Retry transaction fail: ${e.message}")
                     Thread.sleep(retries * 5L)
             }
         }
