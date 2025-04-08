@@ -17,120 +17,114 @@ import java.io.ByteArrayOutputStream
 import java.util.*
 import java.util.concurrent.*
 
-class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase, val projectId: Int) {
+class GitRepositoryUtil(
+    val gitOps: GitOperations,
+    val vcsDataBase: VCSDataBase,
+    val projectId: Int,
+    val filePathMap: ConcurrentHashMap<String, Long>,
+    val developersMap: ConcurrentHashMap<String, DeveloperInfo>
+) {
     private val log: Logger = LoggerFactory.getLogger(GitRepositoryUtil::class.java)
     private val fileSizeCache = mutableMapOf<String, Long?>()
 
-    suspend fun dbPrepared(filePathMap: ConcurrentHashMap<String, Long>) {
+    suspend fun dbPrepared() {
         coroutineScope {
-            gitOps.git.use { git ->
-                val commits = git.log().call().toList()
-                log.info("Commits in total: ${commits.size}")
-                val filtered =
-                    commits.filter { commit -> !vcsDataBase.isCommitExist(commit.name) && commit.parentCount == 1 }
-                log.info("Commit after filter: ${filtered.size}")
-                val authorIdCache = ConcurrentHashMap<String, Long>()
-                val filePathMapCache = ConcurrentHashMap<String, Long>()
+            val git = gitOps.git
+            val commits = git.log().call().toList()
+            log.info("Commits in total: ${commits.size}")
+            val filtered =
+                commits.filter { commit -> !vcsDataBase.isCommitExist(commit.name) && commit.parentCount <= 1 }
+            log.info("Commit after filter: ${filtered.size}")
+            val authorIdCache = ConcurrentHashMap<String, Long>()
+            val filePathMapCache = ConcurrentHashMap<String, Long>()
 
-                filtered.map { commit ->
-                    launch(Dispatchers.Default) {
-                        val dbAsync = VCSDataBase(vcsDataBase.url)
-                        val paths = getCommitsFiles(commit, git)
-                        withContext(Dispatchers.IO) {
-                            authorIdCache.computeIfAbsent(commit.authorIdent.emailAddress) { email ->
-                                dbAsync.getAuthorId(projectId, email)
-                                    ?: dbAsync.insertAuthor(projectId, commit.authorIdent.name, email)!!
-                            }
-                            paths.keys.map { filePath ->
-                                filePathMapCache.computeIfAbsent(filePath) { path ->
-                                    dbAsync.getFilePathId(projectId, path)
-                                        ?: dbAsync.insertFilePath(projectId, path)
-                                }
+            filtered.map { commit ->
+                launch(Dispatchers.Default) {
+                    val dbAsync = VCSDataBase(vcsDataBase.url)
+                    val paths = getCommitsFiles(commit, git)
+                    withContext(Dispatchers.IO) {
+                        authorIdCache.computeIfAbsent(commit.authorIdent.emailAddress) { email ->
+                            dbAsync.getAuthorId(projectId, email)
+                                ?: dbAsync.insertAuthor(projectId, commit.authorIdent.name, email)!!
+                        }
+                        paths.keys.map { filePath ->
+                            filePathMapCache.computeIfAbsent(filePath) { path ->
+                                dbAsync.getFilePathId(projectId, path)
+                                    ?: dbAsync.insertFilePath(projectId, path)
                             }
                         }
-                        val stability =
-                            CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit))
-                        val commitSize = processCommitSize(commit, git)
-                        if (paths.isEmpty()) return@launch
-                        val fileEntity = paths.values.reduce { acc, fileEntity -> acc.add(fileEntity); acc }
-                        val authorId = authorIdCache[commit.authorIdent.emailAddress]!!
-                        withContext(Dispatchers.IO) {
-                            dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
-                            val fileList: MutableList<FileEntity> = mutableListOf()
-                            paths.keys.forEach { filePath ->
-                                fileList.add(
-                                    FileEntity(
-                                        projectId,
-                                        filePath,
-                                        filePathMapCache[filePath]!!,
-                                        commit.name,
-                                        commit.commitTime
-                                    )
-                                )
-                            }
-                            dbAsync.insertFile(fileList)
-                        }
-                        dbAsync.closeConnection()
                     }
-                }.joinAll()
-                filePathMap.putAll(vcsDataBase.getAllFilePaths(projectId))
-            }
+                    val stability =
+                        CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit))
+                    val commitSize = processCommitSize(commit, git)
+                    if (paths.isEmpty()) return@launch
+                    val fileEntity = paths.values.reduce { acc, fileEntity -> acc.add(fileEntity); acc }
+                    val authorId = authorIdCache[commit.authorIdent.emailAddress]!!
+                    withContext(Dispatchers.IO) {
+                        dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
+                        val fileList: MutableList<FileEntity> = mutableListOf()
+                        paths.keys.forEach { filePath ->
+                            val fileId = filePathMapCache[filePath]!!
+                            fileList.add(FileEntity(projectId, filePath, fileId, commit.name, commit.commitTime))
+                        }
+                        dbAsync.insertFile(fileList)
+                    }
+                    dbAsync.closeConnection()
+                }
+            }.joinAll()
+            filePathMap.putAll(vcsDataBase.getAllFilePaths(projectId))
         }
     }
 
     suspend fun getDeveloperInfo(
-        filePathMap: ConcurrentHashMap<String, Long>,
-        developersMap: ConcurrentHashMap<String, DeveloperInfo>,
         path: String,
         nodePath: String?,
         repositoryFiles: List<RepositoryFile>
     ): Map<String, DeveloperInfo> {
         return coroutineScope {
-            gitOps.git.use { git ->
-                val localPath = nodePath?.takeIf { it != path && it.startsWith(path) }
-                    ?.substring(path.length + 1)?.replace("\\", "/")
-                val commits = if (localPath != null) git.log().addPath(localPath).call() else git.log().call()
-                commits.map { commit ->
-                    launch {
-                        val dbAsync = VCSDataBase(vcsDataBase.url)
-                        dbAsync.getCommit(projectId, commit.name)?.let { commitEntity ->
-                            developersMap.computeIfAbsent(commitEntity.authorEmail) {
-                                DeveloperInfo(commitEntity, commit)
-                            }.updateByCommit(commitEntity, commit)
-                        }
-                        dbAsync.closeConnection()
-
+            val git = gitOps.git
+            val localPath = nodePath?.takeIf { it != path && it.startsWith(path) }
+                ?.extractLocalPath(path)
+            val commits = if (localPath != null) git.log().addPath(localPath).call() else git.log().call()
+            commits.map { commit ->
+                launch {
+                    val dbAsync = VCSDataBase(vcsDataBase.url)
+                    dbAsync.getCommit(projectId, commit.name)?.let { commitEntity ->
+                        developersMap.computeIfAbsent(commitEntity.authorEmail) {
+                            DeveloperInfo(commitEntity, commit)
+                        }.updateByCommit(commitEntity, commit)
                     }
-                }.joinAll()
-
-
-                val head = git.repository.resolve(Constants.HEAD)
-                val fileStream = repositoryFiles
-                    .filter { (it.file.path.startsWith(localPath ?: "") && !it.file.path.endsWith(".DS_Store")) }
-                    .map { it.file.path.substring(path.length + 1).replace("\\", "/") }
-                    .filter { filePathMap.keys.contains(it) and
-                            !vcsDataBase.isBlameExist(projectId, filePathMap[it]!!, head.name) }
-                fileStream.forEach { vcsDataBase.insertBlameFile(projectId, filePathMap[it]!!, head.name) }
-                val fileAndBlameId = fileStream.map {
-                    it to vcsDataBase.getBlameFileId(projectId, filePathMap[it]!!, head.name)!!
+                    dbAsync.closeConnection()
                 }
+            }.joinAll()
 
-                val devs = vcsDataBase.getDevelopersByProjectId(projectId)
-                fileAndBlameId.filter { !vcsDataBase.isBlameExist(projectId, it.second) }.map { (filePath, blameId) ->
-                    launch(Dispatchers.Default) {
-                        val dbAsync = VCSDataBase(vcsDataBase.url)
-                        runCatching {
-                            git.blame().setFilePath(filePath).setStartCommit(head).call()?.let {
-                                updateFileOwner(it, devs, dbAsync, projectId, blameId)
-                            }
-                            dbAsync.updateBlameLineSize(blameId)
-                        }.onFailure { it.printStackTrace() }
-                        dbAsync.closeConnection()
-                    }
-                }.joinAll()
-
-                vcsDataBase.developerUpdateByBlameInfo(projectId, developersMap)
+            val head = git.repository.resolve(Constants.HEAD)
+            val fileStream = repositoryFiles
+                .filter { (it.file.path.startsWith(localPath ?: "") && !it.file.path.endsWith(".DS_Store")) }
+                .map { it.file.path.extractLocalPath(path) }
+                .filter {
+                    (filePathMap[it]?.let { it1 -> vcsDataBase.isBlameExist(projectId, it1, head.name) } == true).not()
+                }
+            fileStream.forEach { vcsDataBase.insertBlameFile(projectId, filePathMap[it]!!, head.name) }
+            val fileAndBlameId = fileStream.map {
+                it to vcsDataBase.getBlameFileId(projectId, filePathMap[it]!!, head.name)!!
             }
+
+            val devs = vcsDataBase.getDevelopersByProjectId(projectId)
+            fileAndBlameId.filter { !vcsDataBase.isBlameExist(projectId, it.second) }.map { (filePath, blameId) ->
+                launch(Dispatchers.Default) {
+                    val dbAsync = VCSDataBase(vcsDataBase.url)
+                    runCatching {
+                        git.blame().setFilePath(filePath).setStartCommit(head).call()?.let {
+                            updateFileOwner(it, devs, dbAsync, projectId, blameId)
+                        }
+                        dbAsync.updateBlameLineSize(blameId)
+                    }.onFailure { it.printStackTrace() }
+                    dbAsync.closeConnection()
+                }
+            }.joinAll()
+
+            vcsDataBase.developerUpdateByBlameInfo(projectId, developersMap)
             developersMap
         }
     }
@@ -142,11 +136,10 @@ class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase,
             diffFormatter.setRepository(git.repository)
             diffFormatter.setDiffComparator(RawTextComparator.DEFAULT)
             diffFormatter.isDetectRenames = true
-            commit.parents.firstOrNull()?.let { parent ->
-                diffFormatter.scan(parent, commit).forEach { diff ->
-                    val fileChangeEntity = paths.getOrPut(diff.newPath) { FileChangeEntity() }
-                    fileChangeEntity.applyChanges(diff, diffFormatter, out.size())
-                }
+            val parent = commit.parents.firstOrNull()
+            diffFormatter.scan(parent, commit).forEach { diff ->
+                val fileChangeEntity = paths.getOrPut(diff.newPath) { FileChangeEntity() }
+                fileChangeEntity.applyChanges(diff, diffFormatter, out.size())
             }
         }
         return paths
@@ -196,8 +189,11 @@ class GitRepositoryUtil(val gitOps: GitOperations, val vcsDataBase: VCSDataBase,
     }
 
     fun repositorySize(repoPath: String, filePath: String?): Map<String, CommitSize> {
-        val localPath = filePath?.takeIf { it != repoPath && it.startsWith(repoPath) }
-            ?.substring(repoPath.length + 1)?.replace("\\", "/") ?: ""
+        val localPath = filePath?.takeIf { it != repoPath && it.startsWith(repoPath) }?.extractLocalPath(repoPath) ?: ""
         return vcsDataBase.getCommitSizeMap(projectId, localPath)
+    }
+
+    private fun String.extractLocalPath(path: String): String {
+        return this.substring(path.length + 1).replace("\\", "/")
     }
 }

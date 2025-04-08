@@ -44,7 +44,7 @@ open class GitRepository
     init {
         log.debug("Creating a GitRepository from path $path")
         this.vcsDataBase = vcsDataBase ?:  VCSDataBase("$path/repository.db")
-        gitRepositoryUtil = GitRepositoryUtil(gitOps, vcsDataBase!!, projectId)
+        gitRepositoryUtil = GitRepositoryUtil(gitOps, vcsDataBase!!, projectId, filePathMap, developersMap)
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
 //        repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
     }
@@ -84,10 +84,10 @@ open class GitRepository
     override fun reset() = gitOps.reset()
 
     override fun dbPrepared() =
-        runBlocking { gitRepositoryUtil.dbPrepared(filePathMap) }
+        runBlocking { gitRepositoryUtil.dbPrepared() }
 
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> =
-        runBlocking { gitRepositoryUtil.getDeveloperInfo(filePathMap, developersMap, path, nodePath, files()) }
+        runBlocking { gitRepositoryUtil.getDeveloperInfo(path, nodePath, files()) }
 
     override fun getCommitFromTag(tag: String): String = gitOps.getCommitByTag(tag)
 
