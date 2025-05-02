@@ -52,7 +52,7 @@ open class GitRepository
     override val info: SCMRepository
         get() = runCatching {
             SCMRepository(this, gitOps.getOrigin(), repoName, path, gitOps.getHeadCommit().id, gitOps.getLastCommit().id)
-        }.getOrElse { throw RuntimeException("Couldn't create JGit instance with path $path") }
+        }.getOrElse { throw RuntimeException("Couldn't create JGit instance with path $path: ${it.message}") }
 
     override fun getRepositorySize(all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> =
         gitRepositoryUtil.repositorySize(path, filePath)

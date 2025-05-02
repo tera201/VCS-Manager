@@ -44,9 +44,7 @@ class GitOperations(var path:String) {
         }.getOrElse { throw RuntimeException("Error in getHead() for $path", it) }
     }
 
-    fun getOrigin(): String = runCatching {
-        git.repository.config.getString("remote", "origin", "url")
-    }.getOrElse { throw RuntimeException("Couldn't get origin for repo: $path") }
+    fun getOrigin(): String = git.repository.config.getString("remote", "origin", "url") ?: ""
 
     private fun convertToDate(revCommit: RevCommit): GregorianCalendar = GregorianCalendar().apply {
         timeZone = TimeZone.getTimeZone(revCommit.authorIdent.zoneId)
