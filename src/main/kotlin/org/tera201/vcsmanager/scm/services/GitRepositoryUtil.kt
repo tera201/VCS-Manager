@@ -63,7 +63,7 @@ class GitRepositoryUtil(
                     withContext(Dispatchers.IO) {
                         dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
                         val fileList: MutableList<FileEntity> = mutableListOf()
-                        paths.keys.forEach { filePath ->
+                        paths.keys.filter { filePathMapCache.containsKey(it) }.forEach { filePath ->
                             val fileId = filePathMapCache[filePath]!!
                             fileList.add(FileEntity(projectId, filePath, fileId, commit.name, commit.commitTime))
                         }
@@ -102,9 +102,8 @@ class GitRepositoryUtil(
             val fileStream = repositoryFiles
                 .filter { (it.file.path.startsWith(localPath ?: "") && !it.file.path.endsWith(".DS_Store")) }
                 .map { it.file.path.extractLocalPath(path) }
-                .filter {
-                    (filePathMap[it]?.let { it1 -> vcsDataBase.isBlameExist(projectId, it1, head.name) } == true).not()
-                }
+                .filter { filePathMap.containsKey(it) }
+                .filter { !vcsDataBase.isBlameExist(projectId, filePathMap[it]!!, head.name) }
             fileStream.forEach { vcsDataBase.insertBlameFile(projectId, filePathMap[it]!!, head.name) }
             val fileAndBlameId = fileStream.map {
                 it to vcsDataBase.getBlameFileId(projectId, filePathMap[it]!!, head.name)!!
