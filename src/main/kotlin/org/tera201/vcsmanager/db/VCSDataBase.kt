@@ -102,7 +102,29 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
             FOREIGN KEY (authorId) REFERENCES Authors(id),
             UNIQUE (projectId, authorId, BlameFileId) 
         );
-    """.trimIndent()
+    """.trimIndent(),
+
+        "Branches" to """
+            CREATE TABLE IF NOT EXISTS Branches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                projectId INTEGER NOT NULL,
+                FOREIGN KEY (projectId) REFERENCES Projects(id),
+                UNIQUE (name, projectId) 
+            );
+        """.trimIndent(),
+
+        "BranchCommitMap" to """
+            CREATE TABLE IF NOT EXISTS BranchCommitMap (
+                projectId INTEGER NOT NULL,
+                branchId INTEGER NOT NULL,
+                commitHash TEXT NOT NULL,
+                PRIMARY KEY (branchId, commitHash),
+                FOREIGN KEY (projectId) REFERENCES Projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (branchId) REFERENCES Branches(id) ON DELETE CASCADE,
+                FOREIGN KEY (commitHash) REFERENCES Commits(hash) ON DELETE CASCADE
+            );
+        """
     )
 
     init {
@@ -291,6 +313,26 @@ class VCSDataBase(val url:String): SQLiteCommon(url) {
             WHERE bf.projectId = ? AND bf.filePathId = ? AND bf.fileHash = ?
             """.trimIndent()
         return executeQuery(sql, projectId, filePathId, fileHash) { it.next() }
+    }
+
+    fun insertBranch(projectId: Int, branchName: String):Int {
+        val sql = "INSERT OR IGNORE INTO Branches(projectId, name) VALUES(?, ?)"
+        return if (executeUpdate(sql, projectId, branchName)) getLastInsertId() else -1
+    }
+
+    fun insertBranches(projectId: Int, branches: List<String>) {
+        val sql = "INSERT OR IGNORE INTO Branches(projectId, name) VALUES(?, ?)"
+        executeBatchWithRetry(sql, branches.map { arrayOf(projectId, it) })
+    }
+
+    fun getBranchId(projectId: Int, branchName: String): Int? {
+        val sql = "SELECT id FROM Branches WHERE projectId = ? AND name = ?"
+        return executeQuery(sql, projectId, branchName) { getIdResult(it) }
+    }
+
+    fun insertBranchCommit(projectId: Int, branchId: Int, commitHash: String) {
+        val sql = "INSERT OR IGNORE INTO BranchCommitMap(projectId, branchId, commitHash) VALUES(?, ?, ?)"
+        executeUpdateWithRetry(sql, projectId, branchId, commitHash)
     }
 
     fun getDevelopersByProjectId(projectId: Int): Map<String, Long> {

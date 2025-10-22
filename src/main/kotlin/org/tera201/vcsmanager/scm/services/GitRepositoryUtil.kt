@@ -7,6 +7,7 @@ import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.diff.RawTextComparator
 import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -73,6 +74,30 @@ class GitRepositoryUtil(
                 }
             }.joinAll()
             filePathMap.putAll(vcsDataBase.getAllFilePaths(projectId))
+
+            prepareBranchInfo()
+        }
+    }
+
+    suspend fun prepareBranchInfo() {
+        coroutineScope {
+            val git = gitOps.git
+            val db = VCSDataBase(vcsDataBase.url)
+            val revWalk = RevWalk(git.repository)
+            for (ref in git.branchList().call()) {
+                val branchId = db.getBranchId(projectId, ref.name) ?: db.insertBranch(projectId, ref.name)
+                if (branchId == -1) {
+                    log.error("Failed to insert branch: ${ref.name}")
+                    continue
+                }
+                val headCommit = revWalk.parseCommit(ref.objectId)
+                val commits = git.log().add(headCommit).call().filter { commit -> vcsDataBase.isCommitExist(commit.name) }
+
+                for (commit in commits) {
+                    db.insertBranchCommit(projectId, branchId, commit.name)
+                }
+            }
+            db.closeConnection()
         }
     }
 
@@ -81,6 +106,7 @@ class GitRepositoryUtil(
         nodePath: String?,
         repositoryFiles: List<RepositoryFile>
     ): Map<String, DeveloperInfo> {
+        developersMap.clear() // Clear cache for the next usage
         return coroutineScope {
             val git = gitOps.git
             val localPath = nodePath?.takeIf { it != path && it.startsWith(path) }
@@ -157,7 +183,9 @@ class GitRepositoryUtil(
                     val objectId = treeWalk.getObjectId(0)
                     val objectHash = objectId.name
                     projectSize += fileSizeCache.getOrPut(objectHash) {
-                        reader.open(objectId).takeIf { it.type == Constants.OBJ_BLOB }?.size
+                        runCatching {
+                            reader.open(objectId).takeIf { it.type == Constants.OBJ_BLOB }?.size
+                        }.getOrNull()
                     } ?: 0L
                 }
             }

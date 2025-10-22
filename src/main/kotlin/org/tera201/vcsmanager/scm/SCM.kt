@@ -44,6 +44,8 @@ interface SCM {
     /** Retrieves all branches in the repository. */
     val allBranches: List<Ref>
 
+    val allBranchesMap: Map<String, Ref>
+
     /** Retrieves all tags in the repository. */
     val allTags: List<Ref>
 

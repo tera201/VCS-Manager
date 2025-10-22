@@ -65,6 +65,9 @@ open class GitRepository
 
     override val allBranches: List<Ref> get() = gitOps.getAllBranches()
 
+    override val allBranchesMap: Map<String, Ref>
+        get() = gitOps.getAllBranches().associateBy { it.name }
+
     override val allTags: List<Ref> get() = gitOps.getAllTags()
 
     override val currentBranchOrTagName: String get() = gitOps.getCurrentBranchOrTagName()
