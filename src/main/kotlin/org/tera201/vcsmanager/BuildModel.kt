@@ -16,13 +16,11 @@ class BuildModel {
 
     fun createClone(gitUrl: String, path: String, dataBaseDirPath: String): SCMRepository {
         val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
-        vcsDataBase.createTables()
         return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(vcsDataBase).buildAsRemoteSCMRepository()
     }
 
     fun createClone(gitUrl: String, path: String, username: String, password: String, dataBaseDirPath: String ): SCMRepository {
         val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
-        vcsDataBase.createTables()
         return GitRepositoryBuilder(gitUrl)
             .inTempDir(path)
             .credentials(username, password)
@@ -32,13 +30,11 @@ class BuildModel {
 
     fun getRepository(gitUrl: String, path: String, dataBaseDirPath: String): SCMRepository {
         val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
-        vcsDataBase.createTables()
         return GitRepositoryBuilder(gitUrl).inTempDir(path).dateBase(vcsDataBase).buildAsRemoteSCMRepository()
     }
 
     fun getRepository(projectPath: String, dataBaseDirPath: String): SCMRepository {
         val vcsDataBase = VCSDataBase("$dataBaseDirPath/repository.db")
-        vcsDataBase.createTables()
         return GitRepositoryBuilder().inTempDir(projectPath).dateBase(vcsDataBase).buildAsLocalSCMRepository()
     }
 

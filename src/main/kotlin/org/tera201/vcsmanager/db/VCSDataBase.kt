@@ -3,365 +3,308 @@ package org.tera201.vcsmanager.db
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.eclipse.jgit.revwalk.RevCommit
+import org.jetbrains.exposed.v1.core.GroupConcat
+import org.jetbrains.exposed.v1.core.TextColumnType
+import org.jetbrains.exposed.v1.core.alias
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.castTo
+import org.jetbrains.exposed.v1.core.like
+import org.jetbrains.exposed.v1.core.max
+import org.jetbrains.exposed.v1.core.min
+import org.jetbrains.exposed.v1.core.sum
+import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.batchInsert
+import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.insertIgnore
+import org.jetbrains.exposed.v1.jdbc.select
+import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.update
 import org.tera201.vcsmanager.db.entities.*
+import org.tera201.vcsmanager.db.tables.*
 import java.util.*
 
 
-class VCSDataBase(val url:String): SQLiteCommon(url) {
-
-    override val tableCreationQueries = mapOf(
-        "Projects" to """
-        CREATE TABLE IF NOT EXISTS Projects (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            filePath TEXT NOT NULL,
-            UNIQUE (name, filePath) 
-        );
-    """.trimIndent(),
-
-        "Authors" to """
-        CREATE TABLE IF NOT EXISTS Authors (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            projectId INTEGER NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            UNIQUE (email, projectId) 
-        );
-    """.trimIndent(),
-
-        "Commits" to """
-        CREATE TABLE IF NOT EXISTS Commits (
-            hash TEXT PRIMARY KEY,
-            date INTEGER NOT NULL,
-            projectSize LONG,
-            projectId INTEGER NOT NULL,
-            authorId LONG NOT NULL,
-            stability DOUBLE NOT NULL,
-            filesAdded INTEGER NOT NULL,
-            filesDeleted INTEGER NOT NULL,
-            filesModified INTEGER NOT NULL,
-            linesAdded INTEGER NOT NULL,
-            linesDeleted INTEGER NOT NULL,
-            linesModified INTEGER NOT NULL,
-            changes INTEGER NOT NULL,
-            changesSize INTEGER NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (authorId) REFERENCES Authors(id),
-            UNIQUE (hash, projectId)
-        );
-    """.trimIndent(),
-
-        "Files" to """
-        CREATE TABLE IF NOT EXISTS Files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            projectId INTEGER NOT NULL,
-            filePathId INTEGER NOT NULL,
-            hash TEXT,
-            date INTEGER NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (filePathId) REFERENCES FilePath(id),
-            FOREIGN KEY (hash) REFERENCES Commits(hash)
-        );
-    """.trimIndent(),
-
-        "FilePath" to """
-        CREATE TABLE IF NOT EXISTS FilePath (
-            id INTEGER PRIMARY KEY,
-            projectId INTEGER NOT NULL,
-            filePath TEXT NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            UNIQUE (projectId, filePath)
-        );
-    """.trimIndent(),
-
-        "BlameFiles" to """
-        CREATE TABLE IF NOT EXISTS BlameFiles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            projectId TEXT NOT NULL,
-            filePathId TEXT NOT NULL,
-            fileHash TEXT NOT NULL,
-            lineSize LONG,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (filePathId) REFERENCES FilePath(id),
-            FOREIGN KEY (fileHash) REFERENCES Commits(hash),
-            UNIQUE (projectId, filePathId, fileHash) 
-        );
-    """.trimIndent(),
-
-        "Blames" to """
-        CREATE TABLE IF NOT EXISTS Blames (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            projectId INT NOT NULL,
-            authorId LONG NOT NULL,
-            blameFileId INT NOT NULL,
-            lineIds TEXT NOT NULL,
-            lineCounts LONG NOT NULL,
-            lineSize LONG NOT NULL,
-            FOREIGN KEY (projectId) REFERENCES Projects(id),
-            FOREIGN KEY (authorId) REFERENCES Authors(id),
-            UNIQUE (projectId, authorId, BlameFileId) 
-        );
-    """.trimIndent(),
-
-        "Branches" to """
-            CREATE TABLE IF NOT EXISTS Branches (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                projectId INTEGER NOT NULL,
-                FOREIGN KEY (projectId) REFERENCES Projects(id),
-                UNIQUE (name, projectId) 
-            );
-        """.trimIndent(),
-
-        "BranchCommitMap" to """
-            CREATE TABLE IF NOT EXISTS BranchCommitMap (
-                projectId INTEGER NOT NULL,
-                branchId INTEGER NOT NULL,
-                commitHash TEXT NOT NULL,
-                PRIMARY KEY (branchId, commitHash),
-                FOREIGN KEY (projectId) REFERENCES Projects(id) ON DELETE CASCADE,
-                FOREIGN KEY (branchId) REFERENCES Branches(id) ON DELETE CASCADE,
-                FOREIGN KEY (commitHash) REFERENCES Commits(hash) ON DELETE CASCADE
-            );
-        """
-    )
+class VCSDataBase(val url:String) {
+    val database: Database = Database.connect("jdbc:sqlite:$url", "org.sqlite.JDBC")
 
     init {
-        createTables()
+        transaction(database) {
+            SchemaUtils.create(Projects, Authors, Commits, CommitMessages, Files, FilePath, BlameFiles, Blames, Branches, BranchCommitMap)
+        }
     }
 
-    fun insertProject(name: String, filePath: String):Int {
-        val sql = "INSERT OR IGNORE INTO Projects(name, filePath) VALUES(?, ?)"
-        return if (executeUpdate(sql, name, filePath)) getLastInsertId() else -1
+    fun insertProject(name: String, filePath: String):Int = transaction { Projects.insert {
+            it[this.name] = name
+            it[this.path] = filePath
+
+        } get Projects.id }
+
+    fun getProjectId(projectName: String, filePath: String): Int? = transaction { Projects.select(Projects.id)
+        .where {
+            Projects.name eq projectName
+            Projects.path eq filePath
+        }.firstOrNull()?.get(Projects.id) }
+
+    // TODO issues with non null return
+    fun insertAuthor(projectId:Int, name: String, email: String):Long = transaction {
+            maxAttempts = 30
+            queryTimeout = 2
+            Authors.insert {
+                it[this.id] = UUID.randomUUID().mostSignificantBits
+                it[this.projectId] = projectId
+                it[this.name] = name
+                it[this.email] = email
+            } get Authors.id
+        }
+
+    // TODO issues with non null return
+    fun getAuthorId(projectId: Int, email: String): Long? = transaction { Authors.select(Authors.id)
+        .where {
+            Authors.projectId eq projectId
+            Authors.email eq email
+        }.firstOrNull()?.get(Authors.id)
     }
 
-    fun getProjectId(projectName: String, filePath: String): Int? {
-        val sql = "SELECT id FROM Projects WHERE name = ? AND filePath = ?"
-        return executeQuery(sql, projectName, filePath) { getIdResult(it) }
+    fun insertCommitMessage(projectId: Int, commit:RevCommit) = transaction { CommitMessages.insert {
+            it[this.hash] = commit.name
+            it[this.projectId] = projectId
+            it[this.shortMessage] = commit.shortMessage
+            it[this.fullMessage] = commit.fullMessage
+        } }
+
+    fun insertCommit(projectId:Int, authorId: Long, commit:RevCommit, projectSize: Long, stability: Double, fileChangeEntity: FileChangeEntity):String = transaction { maxAttempts = 30; queryTimeout = 2
+            Commits.insert {
+                it[this.projectId] = projectId
+                it[this.authorId] = authorId
+                it[this.hash] = commit.name
+                it[this.date] = commit.commitTime
+                it[this.projectSize] = projectSize
+                it[this.stability] = stability
+                it[this.filesAdded] = fileChangeEntity.fileAdded
+                it[this.filesDeleted] = fileChangeEntity.fileDeleted
+                it[this.filesModified] = fileChangeEntity.fileModified
+                it[this.linesAdded] = fileChangeEntity.linesAdded
+                it[this.linesDeleted] = fileChangeEntity.linesDeleted
+                it[this.linesModified] = fileChangeEntity.linesModified
+                it[this.changes] = fileChangeEntity.changes
+                it[this.changesSize] = fileChangeEntity.changesSize
+
+            } get Commits.hash
+        }
+
+    fun getAllCommits(projectId: Int): List<CommitEntity> = transaction {
+        (Commits innerJoin Authors).selectAll().where { Commits.projectId eq projectId }.map { CommitEntity(it) }
+    }
+
+    fun getCommitShortMessage(projectId: Int, hash: String): String? = transaction {
+        CommitMessages.select(CommitMessages.shortMessage)
+            .where { CommitMessages.hash eq hash and (CommitMessages.projectId eq projectId) }
+            .firstOrNull()?.get(CommitMessages.shortMessage)
+    }
+
+    fun getCommitFullMessage(projectId: Int, hash: String): String? = transaction {
+        CommitMessages.select(CommitMessages.fullMessage)
+            .where { CommitMessages.hash eq hash and (CommitMessages.projectId eq projectId) }
+            .firstOrNull()?.get(CommitMessages.fullMessage)
+    }
+
+    fun getCommitMessages(projectId: Int, hash: String): Pair<String, String> = transaction {
+        CommitMessages.select(CommitMessages.shortMessage, CommitMessages.fullMessage)
+            .where { CommitMessages.hash eq hash and (CommitMessages.projectId eq projectId) }
+            .firstOrNull()?.let { Pair(it.get(CommitMessages.shortMessage), it.get(CommitMessages.fullMessage)) } ?: Pair("", "")
+    }
+
+    fun getCommit(projectId: Int, hash: String): CommitEntity? = transaction {
+        (Commits innerJoin Authors).selectAll().where { Commits.projectId eq projectId and (Commits.hash eq hash) }
+            .firstOrNull()?.let { CommitEntity(it) }
+    }
+
+    fun getCommit(projectId: Int, hash: String, authorEmail: String): CommitEntity? = transaction {
+        (Commits innerJoin Authors).selectAll().where { Commits.projectId eq projectId and (Commits.hash eq hash) and (Authors.email eq authorEmail) }
+            .firstOrNull()?.let { CommitEntity(it) }
+    }
+
+    fun getDeveloperInfo(projectId: Int, filePath: String) : Map<String, CommitSize>  = transaction {
+        (Commits innerJoin Authors innerJoin Files innerJoin FilePath).selectAll()
+            .where { (Commits.projectId eq projectId) and (FilePath.filePath eq filePath) }
+            .associate { it[Commits.hash] to  CommitSize(it)}
+    }
+
+    fun getCommitSizeMap(projectId: Int, filePath: String) : Map<String, CommitSize> = transaction  {
+        (Commits innerJoin Authors innerJoin Files innerJoin FilePath).selectAll()
+            .where { (Commits.projectId eq projectId) and (FilePath.filePath like "%$filePath%") }
+            .associate { it[Commits.hash] to  CommitSize(it)}
+    }
+
+    fun isCommitExist(hash: String): Boolean = transaction {
+        Commits.select(Commits.hash).where { Commits.hash eq hash }.firstOrNull() != null
+    }
+
+    fun insertBlameFile(projectId: Int, filePathId: Long, fileHash: String) = transaction {
+        BlameFiles.insertIgnore {
+            it[this.projectId] = projectId
+            it[this.filePathId] = filePathId
+            it[this.fileHash] = fileHash
+        }
     }
 
     // TODO issues with non null return
-    fun insertAuthor(projectId:Int, name: String, email: String):Long? {
-        val sql = "INSERT OR IGNORE INTO Authors(id, projectId, name, email) VALUES(?, ?, ?, ?)"
-        return retryTransaction{
-            val uniqueId = UUID.randomUUID().mostSignificantBits
-            if (executeUpdate(sql, uniqueId, projectId, name, email)) uniqueId else null
+    fun insertFilePath(projectId: Int, filePath: String):Long = transaction {
+        FilePath.insert {
+            it[this.id] = UUID.randomUUID().mostSignificantBits
+            it[this.projectId] = projectId
+            it[this.filePath] = filePath
+        } get FilePath.id
+    }
+
+    fun getFilePathId(projectId: Int, filePath: String): Long? = transaction {
+        FilePath.select(FilePath.id)
+            .where { FilePath.projectId eq projectId and (FilePath.filePath eq filePath) }.firstOrNull()?.get(FilePath.id)
+    }
+
+    fun getAllFilePaths(projectId: Int): Map<String, Long> = transaction {
+        FilePath.select(FilePath.filePath, FilePath.id)
+            .where { FilePath.projectId eq projectId }.associate { it[FilePath.filePath] to it[FilePath.id]}
+    }
+
+    fun insertFile(projectId: Int, filePathId: Long, hash: String, date: Int):Int = transaction {
+        Files.insert {
+            it[this.projectId] = projectId
+            it[this.filePathId] = filePathId
+            it[this.hash] = hash
+            it[this.date] = date
+        } get Files.id
+    }
+
+    fun insertFile(fileList: List<FileEntity>) = transaction {
+        maxAttempts = 30; queryTimeout = 2
+        Files.batchInsert(fileList, ignore = true) { file ->
+            this[Files.projectId] = file.projectId
+            this[Files.filePathId] = file.filePathId
+            this[Files.hash] = file.hash
+            this[Files.date] = file.date
         }
     }
 
-    // TODO issues with non null return
-    fun getAuthorId(projectId: Int, email: String): Long? {
-        val sql = "SELECT id FROM Authors WHERE projectId = ? AND email = ?"
-        return executeQuery(sql, projectId, email) { getIdResult(it) }
+    fun insertFile(file: FileEntity):Int = transaction {
+        Files.insert {
+            it[this.projectId] = file.projectId
+            it[this.filePathId] = file.filePathId
+            it[this.hash] = file.hash
+            it[this.date] = file.date
+        } get Files.id
     }
 
-    fun insertCommit(projectId:Int, authorId: Long, commit:RevCommit, projectSize: Long, stability: Double, fileChangeEntity: FileChangeEntity):String {
-        val sql = "INSERT OR IGNORE INTO Commits(projectId, authorId, hash, date, projectSize, stability, filesAdded, filesDeleted, filesModified, linesAdded, linesDeleted, linesModified, changes, changesSize) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING hash"
-        return executeQueryWithRetry(
-                sql,
-                projectId,
-                authorId,
-                commit.name,
-                commit.commitTime,
-                projectSize,
-                stability,
-                *fileChangeEntity.getSQLArgs()) { rs -> if (rs.next()) rs.getString(1) else "" }
-    }
-
-    fun getCommit(projectId: Int, hash: String): CommitEntity? {
-        val sql = """
-            SELECT c.*, a.email as authorEmail, a.name as authorName
-            FROM Commits c
-            JOIN Authors a ON a.id = c.authorId AND a.projectId = c.projectId
-            WHERE hash = ? and c.projectId = ?""".trimIndent()
-        return executeQuery(sql, hash, projectId) {rs ->
-            if (rs.next()) CommitEntity(rs) else null
+    fun updateBlameLineSize(blameFileId: Int) = transaction {
+        val lineSum = Blames.lineSize.sum()
+        val sum = Blames.select(lineSum).where { Blames.blameFileId eq blameFileId }.groupBy(Blames.projectId, Blames.blameFileId)
+        BlameFiles.update({ BlameFiles.id eq blameFileId }) {
+            it[lineSize] = sum
         }
     }
 
-    fun getDeveloperInfo(projectId: Int, filePath: String) : Map<String, CommitSize>  {
-        val commitSizeMap = mutableMapOf<String, CommitSize>()
-        val sql = """
-            SELECT c.*, a.email as authorEmail, a.name as authorName
-            FROM Commits c
-            JOIN Files f ON f.hash = c.hash AND f.projectId = c.projectId
-            JOIN FilePath fp ON f.filePathId = fp.id
-            JOIN Authors a ON a.id = c.authorId AND a.projectId = c.projectId
-            WHERE c.projectId = ?
-              AND fp.filePath LIKE ?
-        """
-        executeQuery(sql, projectId, filePath) { rs ->
-            while (rs.next()) { commitSizeMap[rs.getString("hash")] = CommitSize(rs) }
-        }
-        return commitSizeMap
+    fun getBlameFileId(projectId: Int, filePathId: Long, fileHash: String):Int? = transaction {
+        BlameFiles.select(BlameFiles.id)
+            .where { BlameFiles.projectId eq projectId and (BlameFiles.filePathId eq filePathId) and (BlameFiles.fileHash eq fileHash) }
+        .firstOrNull()?.get(BlameFiles.id)
     }
 
-    fun getCommitSizeMap(projectId: Int, filePath: String) : Map<String, CommitSize>  {
-        val commitSizeMap = mutableMapOf<String, CommitSize>()
-        val sql = """
-            SELECT c.*, a.email as authorEmail, a.name as authorName
-            FROM Commits c
-            JOIN Files f ON f.hash = c.hash AND f.projectId = c.projectId
-            JOIN FilePath fp ON f.filePathId = fp.id
-            JOIN Authors a ON a.id = c.authorId AND a.projectId = c.projectId
-            WHERE c.projectId = ?
-              AND fp.filePath LIKE ?
-        """
-        executeQuery(sql, projectId, filePath + "%") { rs ->
-            while (rs.next()) { commitSizeMap[rs.getString("hash")] = CommitSize(rs) }
-        }
-        return commitSizeMap
+    fun getFirstAndLastHashForFile(projectId: Int, filePathId: Long):Pair<String, String>? = transaction {
+        val fistHash = Files.hash.min().alias("fistHash")
+        val lastHash = Files.hash.max().alias("lastHash")
+        Files.select(fistHash, lastHash).where { Files.projectId eq projectId and (Files.filePathId eq filePathId) }
+            .firstNotNullOfOrNull { row ->
+                val first = row[fistHash]
+                val last = row[lastHash]
+                if (first != null && last != null) last to first else null
+            }
     }
 
-    fun isCommitExist(hash: String): Boolean {
-        val sql = "SELECT * FROM Commits WHERE hash = ?"
-        return executeQuery(sql, hash) { it.next() }
-    }
+    fun insertBlame(blameEntity: BlameEntity) = transaction {
+        Blames.insert {
+            it[Blames.projectId] = blameEntity.projectId
+            it[Blames.authorId] = blameEntity.authorId
+            it[Blames.blameFileId] = blameEntity.blameFileId
+            it[Blames.lineIds] = convertListToJson(blameEntity.lineIds)
+            it[Blames.lineCounts] = blameEntity.lineIds.size.toLong()
+            it[Blames.lineSize] = blameEntity.lineSize
 
-    fun insertBlameFile(projectId: Int, filePathId: Long, fileHash: String):Int {
-        val sql = "INSERT OR IGNORE INTO BlameFiles(projectId, filePathId, fileHash) VALUES(?, ?, ?)"
-        return if (executeUpdateWithRetry(sql, projectId, filePathId, fileHash)) getLastInsertId() else -1
-    }
-
-    // TODO issues with non null return
-    fun insertFilePath(projectId: Int, filePath: String):Long {
-        val sql = "INSERT OR IGNORE INTO FilePath(id, projectId, filePath) VALUES(?, ?, ?)"
-        return retryTransaction{
-            val uniqueId = UUID.randomUUID().mostSignificantBits
-            if (executeUpdate(sql, uniqueId, projectId, filePath)) uniqueId else -1
         }
     }
 
-    fun getFilePathId(projectId: Int, filePath: String): Long? {
-        val sql = "SELECT id FROM FilePath WHERE projectId = ? AND filePath = ?"
-        return executeQuery(sql, projectId, filePath) { getIdResult(it) }
-    }
-
-    fun getAllFilePaths(projectId: Int): Map<String, Long> {
-        val filePaths = mutableMapOf<String, Long>()
-        val sql = "SELECT id, filePath FROM FilePath WHERE projectId = ?"
-        executeQuery(sql, projectId) {rs -> while (rs.next()) filePaths[rs.getString("filePath")] = rs.getLong("id") }
-        return filePaths
-    }
-
-    fun insertFile(projectId: Int, filePathId: Long, hash: String, date: Int):Int {
-        val sql = "INSERT OR IGNORE INTO Files(projectId, filePathId, hash, date) VALUES(?, ?, ?, ?)"
-        return if (executeUpdate(sql, projectId, filePathId, hash, date)) getLastInsertId() else -1
-    }
-
-    fun insertFile(fileList: List<FileEntity>) {
-        val sql = "INSERT OR IGNORE INTO Files(projectId, filePathId, hash, date) VALUES(?, ?, ?, ?)"
-        executeBatchWithRetry(sql, fileList.map { it.getSQLArgs() })
-    }
-
-    fun insertFile(file: FileEntity):Int {
-        val sql = "INSERT OR IGNORE INTO Files(projectId, filePathId, hash, date) VALUES(?, ?, ?, ?)"
-        return if (executeUpdate(sql, file.projectId, file.filePathId, file.hash, file.date)) getLastInsertId() else -1
-    }
-
-    fun updateBlameLineSize(blameFileId: Int) {
-        val sql = """
-            UPDATE BlameFiles 
-            SET lineSize = (SELECT SUM(lineSize) FROM Blames WHERE blameFileId = ? GROUP BY projectId AND blameFileId) 
-            WHERE id = ?
-        """.trimIndent()
-        executeUpdateWithRetry(sql, blameFileId, blameFileId)
-    }
-
-    fun getBlameFileId(projectId: Int, filePathId: Long, fileHash: String):Int? {
-        val sql = "SELECT * FROM BlameFiles WHERE projectId = ? AND filePathId = ? AND fileHash = ?"
-        return executeQuery(sql, projectId, filePathId, fileHash) { getIdResult(it) }
-    }
-
-    // TODO issues with non null return
-    fun getLastFileHash(projectId: Int, filePathId: Long):String? {
-        val sql = "SELECT hash FROM Files WHERE projectId = ? AND filePathId = ? ORDER BY date DESC LIMIT 1"
-        return executeQuery(sql, projectId, filePathId) { if (it.next()) it.getString("hash") else ""}
-    }
-
-    fun getFirstAndLastHashForFile(projectId: Int, filePathId: Long):Pair<String, String>? {
-        val sql = """
-            SELECT MIN(hash) AS firstHash, MAX(hash) AS lastHash
-            FROM Files
-            WHERE projectId = ? AND filePathId = ?
-        """.trimIndent()
-        return executeQuery(sql, projectId, filePathId) { rs ->
-            if (rs.next()) rs.getString("firstHash") to rs.getString("lastHash") else null
+    fun insertBlame(blameEntities: List<BlameEntity>) = transaction {
+        maxAttempts = 30; queryTimeout = 2
+        Blames.batchInsert(blameEntities, ignore = true) { blame ->
+            this[Blames.projectId] = blame.projectId
+            this[Blames.authorId] = blame.authorId
+            this[Blames.blameFileId] = blame.blameFileId
+            this[Blames.lineIds] = convertListToJson(blame.lineIds)
+            this[Blames.lineCounts] = blame.lineIds.size.toLong()
+            this[Blames.lineSize] = blame.lineSize
         }
     }
 
-    fun insertBlame(blameEntity: BlameEntity) {
-        val sql = "INSERT OR IGNORE INTO Blames(projectId, authorId, blameFileId, lineIds, lineCounts, lineSize) VALUES(?, ?, ?, ?, ?, ?)"
-        executeUpdate(sql, blameEntity.getSQLArgs())
+    fun isBlameExist(projectId: Int, blameFileId: Int): Boolean = transaction {
+        Blames.select(Blames.id).where { Blames.projectId eq projectId and (Blames.blameFileId eq blameFileId) }.firstOrNull() != null
     }
 
-    fun insertBlame(blameEntities: List<BlameEntity>) {
-        val sql = "INSERT OR IGNORE INTO Blames(projectId, authorId, blameFileId, lineIds, lineCounts, lineSize) VALUES(?, ?, ?, ?, ?, ?)"
-        executeBatchWithRetry(sql, blameEntities.map { it.getSQLCompressedArgs() })
+    fun isBlameExist(projectId: Int, filePathId: Long, fileHash: String): Boolean = transaction {
+        (Blames innerJoin BlameFiles).select(Blames.id).where { Blames.projectId eq projectId and (BlameFiles.filePathId eq filePathId) and (BlameFiles.fileHash eq fileHash) }.firstOrNull() != null
     }
 
-    fun isBlameExist(projectId: Int, blameFileId: Int): Boolean {
-        val sql = "SELECT id FROM Blames WHERE projectId = ? AND blameFileId = ?"
-        return executeQuery(sql, projectId, blameFileId) { it.next()}
+    fun insertBranch(projectId: Int, branchName: String):Int = transaction {
+        Branches.insert {
+            it[this.projectId] = projectId
+            it[this.name] = branchName
+        } get Branches.id
     }
 
-    fun isBlameExist(projectId: Int, filePathId: Long, fileHash: String):Boolean {
-        val sql = """
-            SELECT * FROM Blames b
-            JOIN BlameFiles bf ON bf.id = b.blameFileId AND bf.projectId = b.projectId
-            WHERE bf.projectId = ? AND bf.filePathId = ? AND bf.fileHash = ?
-            """.trimIndent()
-        return executeQuery(sql, projectId, filePathId, fileHash) { it.next() }
-    }
-
-    fun insertBranch(projectId: Int, branchName: String):Int {
-        val sql = "INSERT OR IGNORE INTO Branches(projectId, name) VALUES(?, ?)"
-        return if (executeUpdate(sql, projectId, branchName)) getLastInsertId() else -1
-    }
-
-    fun insertBranches(projectId: Int, branches: List<String>) {
-        val sql = "INSERT OR IGNORE INTO Branches(projectId, name) VALUES(?, ?)"
-        executeBatchWithRetry(sql, branches.map { arrayOf(projectId, it) })
-    }
-
-    fun getBranchId(projectId: Int, branchName: String): Int? {
-        val sql = "SELECT id FROM Branches WHERE projectId = ? AND name = ?"
-        return executeQuery(sql, projectId, branchName) { getIdResult(it) }
-    }
-
-    fun insertBranchCommit(projectId: Int, branchId: Int, commitHash: String) {
-        val sql = "INSERT OR IGNORE INTO BranchCommitMap(projectId, branchId, commitHash) VALUES(?, ?, ?)"
-        executeUpdateWithRetry(sql, projectId, branchId, commitHash)
-    }
-
-    fun getDevelopersByProjectId(projectId: Int): Map<String, Long> {
-        val developers = mutableMapOf<String, Long>()
-        val sql = "SELECT id, email FROM Authors WHERE projectId = ?"
-        executeQuery(sql, projectId) { rs ->
-            while (rs.next()) developers[rs.getString("email")] = rs.getLong("id")
+    fun insertBranches(projectId: Int, branches: List<String>) = transaction {
+        maxAttempts = 30; queryTimeout = 2
+        Branches.batchInsert(branches, ignore = true) {
+            this[Branches.projectId] = projectId
+            this[Branches.name] = it
         }
-        return developers
     }
 
-    fun developerUpdateByBlameInfo(projectId: Int, developers: Map<String, DeveloperInfo>) {
-        val sql = """
-            SELECT SUM(b.lineCounts) AS lineCount, SUM(b.lineSize) AS lineSize, authors.email, string_agg(bf.filePathId, ', ') as filePaths
-            FROM Blames b
-            JOIN BlameFiles bf ON b.blameFileId = bf.id
-            JOIN Authors authors on authors.id = b.authorId
-            WHERE b.projectId = ?
-            GROUP BY b.projectId, b.authorId
-        """
-        executeQuery(sql, projectId) { rs ->
-            while (rs.next()) {
-                developers[ rs.getString("email")]?.apply {
-                    actualLinesSize = rs.getLong("lineSize")
-                    actualLinesOwner = rs.getLong("lineCount")
-                    ownerForFiles.addAll(rs.getString("filePaths").split(", "))
+    fun getBranchId(projectId: Int, branchName: String): Int? = transaction {
+        Branches.select(Branches.id).where { Branches.projectId eq projectId and (Branches.name eq branchName) }.firstOrNull()?.get(Branches.id)
+    }
+
+    fun insertBranchCommit(projectId: Int, branchId: Int, commitHash: String) = transaction {
+        maxAttempts = 30; queryTimeout = 2
+        BranchCommitMap.insertIgnore {
+            it[this.projectId] = projectId
+            it[this.branchId] = branchId
+            it[this.commitHash] = commitHash
+        }
+    }
+
+    fun getBranchCommitMap(projectId: Int, branchId: Int): List<String> = transaction {
+        BranchCommitMap.select(BranchCommitMap.commitHash)
+            .where { BranchCommitMap.projectId eq projectId and (BranchCommitMap.branchId eq branchId) }.mapNotNull { it[BranchCommitMap.commitHash] }
+    }
+
+    fun getDevelopersByProjectId(projectId: Int): Map<String, Long> = transaction {
+        Authors.select(Authors.email, Authors.id).where { Authors.projectId eq projectId }.associate { it[Authors.email] to it[Authors.id] }
+    }
+
+    fun developerUpdateByBlameInfo(projectId: Int, developers: Map<String, DeveloperInfo>) = transaction {
+        val lineCountSum = Blames.lineCounts.sum().alias("lineCountSum")
+        val lineSizeSum = Blames.lineSize.sum().alias("lineSizeSum")
+        val filePathsId = GroupConcat(
+            BlameFiles.filePathId.castTo<String>(TextColumnType()), ", ", false).alias("filePathsId")
+        (Blames innerJoin  BlameFiles innerJoin  Authors).select(lineSizeSum, lineCountSum, Authors.email, filePathsId)
+            .groupBy(Blames.authorId, Blames.projectId).where { Blames.projectId eq projectId }.forEach {
+                developers[ it[Authors.email] ]?.apply {
+                    actualLinesSize = it[lineSizeSum] ?: 0
+                    actualLinesOwner = it[lineCountSum] ?: 0
+                    ownerForFiles.addAll(it[filePathsId].split(", "))
                 }
             }
-        }
     }
 
     private fun convertListToJson(list: List<Any>): String {

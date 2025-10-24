@@ -1,5 +1,8 @@
 package org.tera201.vcsmanager.db.entities
 
+import org.jetbrains.exposed.v1.core.ResultRow
+import org.tera201.vcsmanager.db.tables.Authors
+import org.tera201.vcsmanager.db.tables.Commits
 import java.sql.ResultSet
 
 data class CommitSize (
@@ -18,6 +21,15 @@ data class CommitSize (
         authorEmail = resultSet.getString("authorEmail"),
         stability = resultSet.getDouble("stability"),
         date = resultSet.getInt("date")
+    )
+
+    constructor(resultRow: ResultRow): this(
+        name = resultRow[Commits.hash],
+        projectSize = resultRow[Commits.projectSize],
+        authorName = resultRow[Authors.name],
+        authorEmail = resultRow[Authors.email],
+        stability = resultRow[Commits.stability],
+        date = resultRow[Commits.date]
     )
 
     fun setAuthor(authorName: String?, authorEmail: String?) {

@@ -1,5 +1,8 @@
 package org.tera201.vcsmanager.db.entities
 
+import org.jetbrains.exposed.v1.core.ResultRow
+import org.tera201.vcsmanager.db.tables.Authors
+import org.tera201.vcsmanager.db.tables.Commits
 import java.sql.ResultSet
 
 data class CommitEntity(
@@ -31,6 +34,27 @@ data class CommitEntity(
             linesModified = resultSet.getInt("linesModified"),
             changes = resultSet.getInt("changes"),
             changesSize = resultSet.getInt("changesSize")
+        )
+    )
+
+    constructor(resultRow: ResultRow) : this(
+        projectId = resultRow[Commits.projectId],
+        authorId = resultRow[Authors.id],
+        authorName = resultRow[Authors.name],
+        authorEmail = resultRow[Authors.email],
+        hash = resultRow[Commits.hash],
+        date = resultRow[Commits.date],
+        projectSize = resultRow[Commits.projectSize],
+        stability = resultRow[Commits.stability],
+        fileChangeEntity = FileChangeEntity(
+            fileAdded = resultRow[Commits.filesAdded],
+            fileDeleted = resultRow[Commits.filesDeleted],
+            fileModified = resultRow[Commits.filesModified],
+            linesAdded = resultRow[Commits.linesAdded],
+            linesDeleted = resultRow[Commits.linesDeleted],
+            linesModified = resultRow[Commits.linesModified],
+            changes = resultRow[Commits.changes],
+            changesSize = resultRow[Commits.changesSize]
         )
     )
 }

@@ -1,6 +1,7 @@
 package org.tera201.vcsmanager.scm
 
 import org.eclipse.jgit.lib.Ref
+import org.tera201.vcsmanager.db.entities.CommitEntity
 import org.tera201.vcsmanager.db.entities.CommitSize
 import org.tera201.vcsmanager.domain.ChangeSet
 import org.tera201.vcsmanager.domain.Commit
@@ -59,6 +60,9 @@ interface SCM {
 
     /** Resets the repository to the HEAD state. */
     fun reset()
+
+    /** Retrieves the commit history of the current branch. */
+    fun getCommitInfo(authorEmail: String, branch: String): List<CommitEntity?>
 
     // ===================== Commit Differences =====================
 

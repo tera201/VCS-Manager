@@ -70,7 +70,6 @@ class GitRepositoryUtil(
                         }
                         dbAsync.insertFile(fileList)
                     }
-                    dbAsync.closeConnection()
                 }
             }.joinAll()
             filePathMap.putAll(vcsDataBase.getAllFilePaths(projectId))
@@ -97,7 +96,6 @@ class GitRepositoryUtil(
                     db.insertBranchCommit(projectId, branchId, commit.name)
                 }
             }
-            db.closeConnection()
         }
     }
 
@@ -120,7 +118,6 @@ class GitRepositoryUtil(
                             DeveloperInfo(commitEntity, commit)
                         }.updateByCommit(commitEntity, commit)
                     }
-                    dbAsync.closeConnection()
                 }
             }.joinAll()
 
@@ -145,7 +142,6 @@ class GitRepositoryUtil(
                         }
                         dbAsync.updateBlameLineSize(blameId)
                     }.onFailure { it.printStackTrace() }
-                    dbAsync.closeConnection()
                 }
             }.joinAll()
 
