@@ -7,7 +7,7 @@ data class DeveloperInfo(
     var id: Long = -1,
     val name: String,
     val emailAddress: String,
-    val commits: MutableSet<RevCommit> = HashSet(),
+    val commits: MutableSet<String> = HashSet(),
     var changes: Long = 0,
     var changesSize: Long = 0,
     var actualLinesOwner: Long = 0,
@@ -27,7 +27,7 @@ data class DeveloperInfo(
         commitEntity.authorName,
         commitEntity.authorEmail
     ) {
-        commits.add(commit)
+        commits.add(commit.name)
         commitEntity.fileChangeEntity.apply {
             this@DeveloperInfo.changes = changes.toLong()
             this@DeveloperInfo.changesSize = changesSize.toLong()
@@ -41,8 +41,8 @@ data class DeveloperInfo(
     }
 
     fun updateByCommit(commitEntity: CommitEntity, commit: RevCommit) {
-        if (!commits.contains(commit)) {
-            commits.add(commit)
+        if (!commits.contains(commit.name)) {
+            commits.add(commit.name)
             commitEntity.fileChangeEntity.apply {
                 this@DeveloperInfo.changes += changes.toLong()
                 this@DeveloperInfo.changesSize += changesSize.toLong()

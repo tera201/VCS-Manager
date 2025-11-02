@@ -117,6 +117,18 @@ class VCSDataBase(val url:String) {
             .firstOrNull()?.let { Pair(it.get(CommitMessages.shortMessage), it.get(CommitMessages.fullMessage)) } ?: Pair("", "")
     }
 
+    fun getCommitsByMessageRegex(projectId: Int, pattern: String): List<String> = transaction {
+        val regex = pattern.toRegex()
+
+        CommitMessages
+            .select(CommitMessages.hash, CommitMessages.fullMessage)
+            .where { CommitMessages.projectId eq projectId }
+            .mapNotNull { row ->
+                val message = row[CommitMessages.fullMessage]
+                if (regex.containsMatchIn(message)) row[CommitMessages.hash] else null
+            }
+    }
+
     fun getCommit(projectId: Int, hash: String): CommitEntity? = transaction {
         (Commits innerJoin Authors).selectAll().where { Commits.projectId eq projectId and (Commits.hash eq hash) }
             .firstOrNull()?.let { CommitEntity(it) }

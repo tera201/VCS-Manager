@@ -66,6 +66,9 @@ open class GitRepository
     override val allBranchesMap: Map<String, Ref>
         get() = gitOps.getAllBranches().associateBy { it.name }
 
+    override val allBranchesName: List<String>
+        get() = gitOps.getAllBranches().map { it.name }
+
     override val allTags: List<Ref> get() = gitOps.getAllTags()
 
     override val currentBranchOrTagName: String get() = gitOps.getCurrentBranchOrTagName()
@@ -97,6 +100,12 @@ open class GitRepository
                 if (authorEmail == "ALL") vcsDataBase.getCommit(projectId, it) else vcsDataBase.getCommit(projectId, it, authorEmail) }
         }
         return vcsDataBase.getAllCommits(projectId)
+    }
+
+    override fun getCommitsByMessageRegex(pattern: String): List<String> = vcsDataBase.getCommitsByMessageRegex(projectId, pattern)
+
+    override fun getCommitBy(branch: String, authorEmail: String, filePath: String?, fileType: String?, messagePattern: String?, changesPattern: String?): List<String> {
+        TODO("Not yet implemented")
     }
 
     override fun getCommitFromTag(tag: String): String = gitOps.getCommitByTag(tag)

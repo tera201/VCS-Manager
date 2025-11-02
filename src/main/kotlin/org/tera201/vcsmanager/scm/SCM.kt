@@ -38,6 +38,10 @@ interface SCM {
     /** Retrieves a commit by its [id], or `null` if not found. */
     fun getCommit(id: String): Commit?
 
+    fun getCommitsByMessageRegex(pattern: String): List<String>
+
+    fun getCommitBy(branch: String, authorEmail: String, filePath: String?, fileType: String?, messagePattern: String?, changesPattern: String?): List<String>
+
     /* TODO A method named getCommitXYZ should return a Commit. */
     /** Retrieves a commit associated with a specific [tag]. */
     fun getCommitFromTag(tag: String): String
@@ -46,6 +50,8 @@ interface SCM {
     val allBranches: List<Ref>
 
     val allBranchesMap: Map<String, Ref>
+
+    val allBranchesName: List<String>
 
     /** Retrieves all tags in the repository. */
     val allTags: List<Ref>
