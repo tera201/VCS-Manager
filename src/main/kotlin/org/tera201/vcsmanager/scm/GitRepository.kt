@@ -93,11 +93,13 @@ open class GitRepository
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> =
         runBlocking { runCatching { gitRepositoryUtil.getDeveloperInfo(path, nodePath, files()) }.onFailure { it.printStackTrace() }.getOrNull()!! }
 
-    override fun getCommitInfo(authorEmail: String, branch: String): List<CommitEntity?> {
+    override fun getCommitInfo(authorEmail: String, branch: String): List<CommitEntity> {
         val branchId = vcsDataBase.getBranchId(projectId, branch)
         if (branchId != null && branchId != -1) {
-            return vcsDataBase.getBranchCommitMap(projectId, branchId).map {
-                if (authorEmail == "ALL") vcsDataBase.getCommit(projectId, it) else vcsDataBase.getCommit(projectId, it, authorEmail) }
+            return if (vcsDataBase.getAuthorId(projectId, authorEmail) == null)
+                vcsDataBase.getBranchCommitMap(projectId, branchId).mapNotNull {vcsDataBase.getCommit(projectId, it)}
+            else
+                vcsDataBase.getBranchCommitMap(projectId, branchId).mapNotNull {vcsDataBase.getCommit(projectId, it, authorEmail)}
         }
         return vcsDataBase.getAllCommits(projectId)
     }

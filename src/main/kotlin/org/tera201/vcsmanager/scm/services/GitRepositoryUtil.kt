@@ -31,7 +31,12 @@ class GitRepositoryUtil(
     suspend fun dbPrepared() {
         coroutineScope {
             val git = gitOps.git
-            val commits = git.log().call().toList()
+            val allRefs = git.repository.refDatabase.getRefsByPrefix("refs/")
+            val logCommand = git.log()
+            for (ref in allRefs) {
+                logCommand.add(ref.objectId)
+            }
+            val commits = logCommand.call().toList()
             log.info("Commits in total: ${commits.size}")
             val filtered =
                 commits.filter { commit -> !vcsDataBase.isCommitExist(commit.name) && commit.parentCount <= 1 }
@@ -63,6 +68,7 @@ class GitRepositoryUtil(
                     val authorId = authorIdCache[commit.authorIdent.emailAddress]!!
                     withContext(Dispatchers.IO) {
                         dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
+                        dbAsync.insertCommitMessage(projectId, commit)
                         val fileList: MutableList<FileEntity> = mutableListOf()
                         paths.keys.filter { filePathMapCache.containsKey(it) }.forEach { filePath ->
                             val fileId = filePathMapCache[filePath]!!

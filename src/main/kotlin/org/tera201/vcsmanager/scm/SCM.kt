@@ -68,7 +68,7 @@ interface SCM {
     fun reset()
 
     /** Retrieves the commit history of the current branch. */
-    fun getCommitInfo(authorEmail: String, branch: String): List<CommitEntity?>
+    fun getCommitInfo(authorEmail: String, branch: String): List<CommitEntity>
 
     // ===================== Commit Differences =====================
 
