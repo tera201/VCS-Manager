@@ -96,7 +96,7 @@ class VCSDataBase(val url:String) {
         }
 
     fun getAllCommits(projectId: Int): List<CommitEntity> = transaction {
-        (Commits innerJoin Authors).selectAll().where { Commits.projectId eq projectId }.map { CommitEntity(it) }
+        (Commits innerJoin Authors innerJoin CommitMessages).selectAll().where { Commits.projectId eq projectId }.map { CommitEntity(it) }
     }
 
     fun getCommitShortMessage(projectId: Int, hash: String): String? = transaction {
@@ -130,12 +130,12 @@ class VCSDataBase(val url:String) {
     }
 
     fun getCommit(projectId: Int, hash: String): CommitEntity? = transaction {
-        (Commits innerJoin Authors).selectAll().where { Commits.projectId eq projectId and (Commits.hash eq hash) }
+        (Commits innerJoin Authors innerJoin CommitMessages).selectAll().where { Commits.projectId eq projectId and (Commits.hash eq hash) }
             .firstOrNull()?.let { CommitEntity(it) }
     }
 
     fun getCommit(projectId: Int, hash: String, authorEmail: String): CommitEntity? = transaction {
-        (Commits innerJoin Authors).selectAll().where { Commits.projectId eq projectId and (Commits.hash eq hash) and (Authors.email eq authorEmail) }
+        (Commits innerJoin Authors innerJoin CommitMessages).selectAll().where { Commits.projectId eq projectId and (Commits.hash eq hash) and (Authors.email eq authorEmail) }
             .firstOrNull()?.let { CommitEntity(it) }
     }
 
