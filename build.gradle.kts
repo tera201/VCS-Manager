@@ -1,4 +1,5 @@
 plugins {
+    alias(libs.plugins.platform)
     alias(libs.plugins.kotlin)
 }
 
@@ -11,6 +12,9 @@ version = "1.0.0"
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
 dependencies {
@@ -26,4 +30,8 @@ dependencies {
     implementation(libs.jackson.databind)
     implementation(libs.coroutines.core)
     implementation(libs.bundles.exposed)
+
+    intellijPlatform {
+        intellijIdeaCommunity("2025.1")
+    }
 }

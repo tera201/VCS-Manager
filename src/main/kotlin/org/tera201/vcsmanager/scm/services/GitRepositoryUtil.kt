@@ -3,12 +3,16 @@ package org.tera201.vcsmanager.scm.services
 import kotlinx.coroutines.*
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.blame.BlameResult
+import org.eclipse.jgit.diff.DiffEntry
 import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.diff.RawTextComparator
 import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.lib.ObjectLoader
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.treewalk.CanonicalTreeParser
 import org.eclipse.jgit.treewalk.TreeWalk
+import org.eclipse.jgit.util.io.DisabledOutputStream
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.tera201.vcsmanager.db.VCSDataBase
@@ -156,6 +160,37 @@ class GitRepositoryUtil(
         }
     }
 
+    fun getCommitChanges(hash: String): Map<String, Pair<String, String>> {
+        val git = gitOps.git
+        val revWalk = RevWalk(git.repository)
+        val currentCommit = revWalk.parseCommit(git.repository.resolve(hash))
+        val parent = currentCommit.parents.firstOrNull()?.let { revWalk.parseCommit(it) }
+        val oldTreeIter = CanonicalTreeParser()
+        val newTreeIter = CanonicalTreeParser()
+        val reader = git.repository.newObjectReader()
+        parent?.tree?.let { oldTreeIter.reset(reader, it) }
+        newTreeIter.reset(reader, currentCommit.tree)
+
+        val diffFormatter = DiffFormatter(DisabledOutputStream.INSTANCE).apply {
+            setRepository(git.repository)
+            isDetectRenames = true
+        }
+
+        val diffs = diffFormatter.scan(oldTreeIter, newTreeIter)
+
+        return if (diffs.isNotEmpty()) {
+            diffs.associate { diff ->
+                val path = when (diff.changeType) {
+                    DiffEntry.ChangeType.ADD -> diff.newPath
+                    DiffEntry.ChangeType.DELETE -> diff.oldPath
+                    else -> diff.newPath
+                }
+                "${diff.changeType}: $path" to Pair(diffFormatter.getOldText(diff), diffFormatter.getNewText(diff))
+            }
+        }
+        else mapOf()
+    }
+
     fun getCommitsFiles(commit: RevCommit, git: Git): Map<String, FileChangeEntity> {
         val out = ByteArrayOutputStream()
         val paths: MutableMap<String, FileChangeEntity> = HashMap()
@@ -224,5 +259,19 @@ class GitRepositoryUtil(
 
     private fun String.extractLocalPath(path: String): String {
         return this.substring(path.length + 1).replace("\\", "/")
+    }
+
+    fun DiffFormatter.getOldText(diff: DiffEntry): String {
+        val oldId = diff.oldId.toObjectId()
+        if (oldId == null || oldId.name == "0000000000000000000000000000000000000000") return ""
+        val loader: ObjectLoader = gitOps.git.repository.open(oldId)
+        return loader.bytes.toString(Charsets.UTF_8)
+    }
+
+    fun DiffFormatter.getNewText(diff: DiffEntry): String {
+        val newId = diff.newId.toObjectId()
+        if (newId == null || newId.name == "0000000000000000000000000000000000000000") return ""
+        val loader: ObjectLoader = gitOps.git.repository.open(newId)
+        return loader.bytes.toString(Charsets.UTF_8)
     }
 }

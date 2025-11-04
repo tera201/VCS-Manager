@@ -46,6 +46,8 @@ interface SCM {
     /** Retrieves a commit associated with a specific [tag]. */
     fun getCommitFromTag(tag: String): String
 
+    fun getCommitDiffByFiles(hash: String): Map<String, Pair<String, String>>
+
     /** Retrieves all branches in the repository. */
     val allBranches: List<Ref>
 

@@ -111,6 +111,7 @@ open class GitRepository
     }
 
     override fun getCommitFromTag(tag: String): String = gitOps.getCommitByTag(tag)
+    override fun getCommitDiffByFiles(hash: String): Map<String, Pair<String, String>> = gitRepositoryUtil.getCommitChanges(hash)
 
     override fun clone(dest: Path): SCM {
         log.info("Cloning to $dest")
