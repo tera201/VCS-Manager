@@ -1,5 +1,6 @@
 package org.tera201.vcsmanager.scm
 
+import com.intellij.openapi.project.Project
 import org.eclipse.jgit.lib.Ref
 import org.tera201.vcsmanager.db.entities.CommitEntity
 import org.tera201.vcsmanager.db.entities.CommitSize
@@ -110,4 +111,5 @@ interface SCM {
 
     /** Prepares the database. */
     fun dbPrepared()
+    fun dbPrepared(project: Project)
 }

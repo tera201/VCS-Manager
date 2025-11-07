@@ -1,5 +1,9 @@
 package org.tera201.vcsmanager.scm.services
 
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.project.Project
 import kotlinx.coroutines.*
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.blame.BlameResult
@@ -21,6 +25,8 @@ import org.tera201.vcsmanager.scm.RepositoryFile
 import java.io.ByteArrayOutputStream
 import java.util.*
 import java.util.concurrent.*
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class GitRepositoryUtil(
     val gitOps: GitOperations,
@@ -32,6 +38,104 @@ class GitRepositoryUtil(
     private val log: Logger = LoggerFactory.getLogger(GitRepositoryUtil::class.java)
     private val fileSizeCache = mutableMapOf<String, Long?>()
 
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    suspend fun dbPrepared(project: Project):Unit =
+        suspendCancellableCoroutine {  continuation ->
+            val task = object : Task.Backgroundable(project, "Preparing Repository Data", true) {
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = false
+                    indicator.text = "Reading commits..."
+
+                    try {
+                        val git = gitOps.git
+                        val allRefs = git.repository.refDatabase.getRefsByPrefix("refs/")
+                        val logCommand = git.log()
+                        for (ref in allRefs) {
+                            logCommand.add(ref.objectId)
+                        }
+                        val commits = logCommand.call().toList()
+                        val filtered =
+                            commits.filter { commit -> !vcsDataBase.isCommitExist(commit.name) && commit.parentCount <= 1 }
+                        val authorIdCache = ConcurrentHashMap<String, Long>()
+                        val filePathMapCache = ConcurrentHashMap<String, Long>()
+                        val dbAsync = VCSDataBase(vcsDataBase.url)
+
+                            runBlocking {
+                                filtered.mapIndexed { index, commit ->
+                                    launch(Dispatchers.Default.limitedParallelism(10)) {
+                                        if (indicator.isCanceled) throw kotlinx.coroutines.CancellationException()
+                                        indicator.fraction = index.toDouble() / (filtered.size + 1)
+                                        indicator.text2 =
+                                            "Processing commit ${commit.name.take(8)} (${index + 1}/${filtered.size})"
+
+                                        val paths = getCommitsFiles(commit, git)
+
+                                        withContext(Dispatchers.IO) {
+                                            if (indicator.isCanceled) throw kotlinx.coroutines.CancellationException()
+                                            authorIdCache.computeIfAbsent(commit.authorIdent.emailAddress) {
+                                                dbAsync.getAuthorId(projectId, commit.authorIdent.emailAddress)
+                                                    ?: dbAsync.insertAuthor(projectId, commit.authorIdent.name, commit.authorIdent.emailAddress)
+                                            }
+                                            paths.keys.map { filePath ->
+                                                    val cachePath = filePathMapCache[filePath]
+                                                    if (cachePath != null) return@map cachePath
+                                                    val compute = dbAsync.getFilePathId(projectId, filePath)
+                                                        ?: dbAsync.insertFilePath(projectId, filePath)
+                                                    filePathMapCache.computeIfAbsent(filePath) { compute }
+                                                }
+                                        }
+
+                                        if (indicator.isCanceled) throw kotlinx.coroutines.CancellationException()
+                                        val stability = CommitStabilityAnalyzer.analyzeCommit(git, commits, commit, commits.indexOf(commit))
+                                        val commitSize = processCommitSize(commit, git)
+                                        if (paths.isEmpty()) return@launch
+                                        val fileEntity = paths.values.reduce { acc, fileEntity -> acc.add(fileEntity); acc }
+                                        val authorId = authorIdCache[commit.authorIdent.emailAddress]!!
+
+                                        withContext(Dispatchers.IO) {
+                                            if (indicator.isCanceled) throw kotlinx.coroutines.CancellationException()
+                                            dbAsync.insertCommit(projectId, authorId, commit, commitSize, stability, fileEntity)
+                                            dbAsync.insertCommitMessage(projectId, commit)
+                                            val fileList: MutableList<FileEntity> = mutableListOf()
+                                            paths.keys.filter { filePathMapCache.containsKey(it) }.forEach { filePath ->
+                                                val fileId = filePathMapCache[filePath]!!
+                                                fileList.add(
+                                                    FileEntity(projectId, filePath, fileId, commit.name, commit.commitTime)
+                                                )
+                                            }
+                                            dbAsync.insertFile(fileList)
+                                        }
+                                    }
+                                }
+                                indicator.fraction = 1.0
+                            }
+                        filePathMap.putAll(vcsDataBase.getAllFilePaths(projectId))
+                        prepareBranchInfo()
+
+                        continuation.resume(Unit)
+                    } catch (e: Throwable) {
+                        if (e is kotlinx.coroutines.CancellationException) {
+                            continuation.cancel()
+                        } else {
+                            continuation.resumeWithException(e)
+                        }
+                    }
+                }
+
+                override fun onCancel() {
+                    if (continuation.isActive) continuation.cancel()
+                }
+
+                override fun onThrowable(error: Throwable) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+            }
+            ProgressManager.getInstance().run(task)
+        }
+
+
+    @Deprecated("Use dbPrepared instead with project parameter", ReplaceWith("dbPrepared(project)"))
     suspend fun dbPrepared() {
         coroutineScope {
             val git = gitOps.git
@@ -55,7 +159,7 @@ class GitRepositoryUtil(
                     withContext(Dispatchers.IO) {
                         authorIdCache.computeIfAbsent(commit.authorIdent.emailAddress) { email ->
                             dbAsync.getAuthorId(projectId, email)
-                                ?: dbAsync.insertAuthor(projectId, commit.authorIdent.name, email)!!
+                                ?: dbAsync.insertAuthor(projectId, commit.authorIdent.name, email)
                         }
                         paths.keys.map { filePath ->
                             filePathMapCache.computeIfAbsent(filePath) { path ->
@@ -88,23 +192,21 @@ class GitRepositoryUtil(
         }
     }
 
-    suspend fun prepareBranchInfo() {
-        coroutineScope {
-            val git = gitOps.git
-            val db = VCSDataBase(vcsDataBase.url)
-            val revWalk = RevWalk(git.repository)
-            for (ref in git.branchList().call()) {
-                val branchId = db.getBranchId(projectId, ref.name) ?: db.insertBranch(projectId, ref.name)
-                if (branchId == -1) {
-                    log.error("Failed to insert branch: ${ref.name}")
-                    continue
-                }
-                val headCommit = revWalk.parseCommit(ref.objectId)
-                val commits = git.log().add(headCommit).call().filter { commit -> vcsDataBase.isCommitExist(commit.name) }
+    fun prepareBranchInfo() {
+        val git = gitOps.git
+        val db = VCSDataBase(vcsDataBase.url)
+        val revWalk = RevWalk(git.repository)
+        for (ref in gitOps.getAllBranches()) {
+            val branchId = db.getBranchId(projectId, ref.name) ?: db.insertBranch(projectId, ref.name)
+            if (branchId == -1) {
+                log.error("Failed to insert branch: ${ref.name}")
+                continue
+            }
+            val headCommit = revWalk.parseCommit(ref.objectId)
+            val commits = git.log().add(headCommit).call().filter { commit -> vcsDataBase.isCommitExist(commit.name) }
 
-                for (commit in commits) {
-                    db.insertBranchCommit(projectId, branchId, commit.name)
-                }
+            for (commit in commits) {
+                db.insertBranchCommit(projectId, branchId, commit.name)
             }
         }
     }
@@ -160,6 +262,7 @@ class GitRepositoryUtil(
         }
     }
 
+    // TODO make more trivial message about large file
     fun getCommitChanges(hash: String): Map<String, Pair<String, String>> {
         val git = gitOps.git
         val revWalk = RevWalk(git.repository)
@@ -178,17 +281,18 @@ class GitRepositoryUtil(
 
         val diffs = diffFormatter.scan(oldTreeIter, newTreeIter)
 
-        return if (diffs.isNotEmpty()) {
-            diffs.associate { diff ->
+        if (diffs.size > 100) {
+            return mapOf("Too big: Changes exceed limit" to Pair("Too big: Changes exceed limit", "Too big: Changes exceed limit"))
+        }
+
+        return diffs.associate { diff ->
                 val path = when (diff.changeType) {
                     DiffEntry.ChangeType.ADD -> diff.newPath
                     DiffEntry.ChangeType.DELETE -> diff.oldPath
                     else -> diff.newPath
                 }
                 "${diff.changeType}: $path" to Pair(diffFormatter.getOldText(diff), diffFormatter.getNewText(diff))
-            }
         }
-        else mapOf()
     }
 
     fun getCommitsFiles(commit: RevCommit, git: Git): Map<String, FileChangeEntity> {
@@ -262,16 +366,24 @@ class GitRepositoryUtil(
     }
 
     fun DiffFormatter.getOldText(diff: DiffEntry): String {
+        val maxChangeSize = 500000
         val oldId = diff.oldId.toObjectId()
         if (oldId == null || oldId.name == "0000000000000000000000000000000000000000") return ""
+
+        if (diff.oldId.toObjectId()?.let { gitOps.git.repository.open(it).size } ?: 0 > maxChangeSize) return "Too big"
         val loader: ObjectLoader = gitOps.git.repository.open(oldId)
         return loader.bytes.toString(Charsets.UTF_8)
     }
 
     fun DiffFormatter.getNewText(diff: DiffEntry): String {
+        val maxChangeSize = 500000
         val newId = diff.newId.toObjectId()
         if (newId == null || newId.name == "0000000000000000000000000000000000000000") return ""
+
+        if (diff.newId.toObjectId()?.let { gitOps.git.repository.open(it).size } ?: 0 > maxChangeSize) return "Too big"
         val loader: ObjectLoader = gitOps.git.repository.open(newId)
         return loader.bytes.toString(Charsets.UTF_8)
     }
+
+    private val dbDispatcher = newSingleThreadContext("DB-Dispatcher")
 }

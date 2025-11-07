@@ -1,5 +1,6 @@
 package org.tera201.vcsmanager.scm
 
+import com.intellij.openapi.project.Project
 import kotlinx.coroutines.runBlocking
 import org.apache.commons.io.FileUtils
 import org.eclipse.jgit.lib.*
@@ -86,6 +87,9 @@ open class GitRepository
 
     @Synchronized
     override fun reset() = gitOps.reset()
+
+    override fun dbPrepared(project: Project) =
+        runBlocking { gitRepositoryUtil.dbPrepared(project) }
 
     override fun dbPrepared() =
         runBlocking { gitRepositoryUtil.dbPrepared() }
