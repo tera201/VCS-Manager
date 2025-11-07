@@ -95,10 +95,16 @@ object CommitStabilityAnalyzer {
         diffFormatter.setRepository(git.repository)
 
         // Get diffs for the original commit (parent → target)
-        val diffsAB = diffFormatter.scan(parent, targetCommit)
+        val diffsAB = runCatching { diffFormatter.scan(parent, targetCommit) }.getOrElse {
+            println("Skipping commit ${targetCommit.name.take(8)}: ${it.message}")
+            return 1.0
+        }
 
         // Get diffs for the next month (target → nextMonth)
-        val diffsBC = diffFormatter.scan(targetCommit, lastMonthCommit)
+        val diffsBC = runCatching { diffFormatter.scan(targetCommit, lastMonthCommit) }.getOrElse {
+            println("Skipping commit ${targetCommit.name.take(8)}: ${it.message}")
+            return 1.0
+        }
 
         for (diffAB in diffsAB) {
             val pathA = diffAB.newPath

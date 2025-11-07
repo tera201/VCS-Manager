@@ -45,9 +45,11 @@ class GitRepositoryUtil(
             val task = object : Task.Backgroundable(project, "Preparing Repository Data", true) {
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = false
-                    indicator.text = "Reading commits..."
+                    indicator.text = "Fetching all objects from remote repository..."
 
                     try {
+                        gitOps.fetchAll()
+                        indicator.text = "Reading commits..."
                         val git = gitOps.git
                         val allRefs = git.repository.refDatabase.getRefsByPrefix("refs/")
                         val logCommand = git.log()

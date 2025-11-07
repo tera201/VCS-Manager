@@ -165,7 +165,7 @@ class VCSDataBase(val url:String) {
 
     // TODO issues with non null return
     fun insertFilePath(projectId: Int, filePath: String):Long = transaction {
-        FilePath.insert {
+        FilePath.insertIgnore {
             it[this.id] = UUID.randomUUID().mostSignificantBits
             it[this.projectId] = projectId
             it[this.filePath] = filePath
