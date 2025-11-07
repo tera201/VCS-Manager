@@ -10,6 +10,10 @@ import kotlin.math.max
 import kotlin.math.min
 
 object CommitStabilityAnalyzer {
+    private val diffFormatterThreadLocal = ThreadLocal.withInitial {
+        DiffFormatter(DisabledOutputStream.INSTANCE)
+    }
+
     fun analyzeCommit(git: Git, commitList: List<RevCommit>, commit: RevCommit, index: Int): Double {
         var commitStability = 1.0
         val commitDate = commit.committerIdent.getWhen()
@@ -21,7 +25,7 @@ object CommitStabilityAnalyzer {
         val nextMonthCommit = findCommitInNextMonth(commitList, index, commitDate, oneMonthLater)
 
         if (nextMonthCommit != null) {
-            commitStability = calculateCommitStability(git, commit, nextMonthCommit)
+            commitStability = calculateCommitStabilityStricter(git, commit, nextMonthCommit)
         }
         return commitStability
     }
@@ -43,82 +47,109 @@ object CommitStabilityAnalyzer {
         return nextMonthCommits
     }
 
+    @Deprecated("Use calculateCommitStabilityStricter instead")
     private fun calculateCommitStability(git: Git, targetCommit: RevCommit, lastMonthCommit: RevCommit): Double {
-        val parent = if (targetCommit.parentCount > 0) targetCommit.getParent(0) else null
+        val parent = if (targetCommit.parentCount > 0) targetCommit.getParent(0) else return 1.0
+        if (targetCommit.tree == null) return 1.0
         val editsAB: MutableList<Edit> = ArrayList()
         val editsBC: MutableList<Edit> = ArrayList()
-        val abSize: Long
+        var abSize = 0L
 
-        DiffFormatter(DisabledOutputStream.INSTANCE).use { diffFormatter ->
-            diffFormatter.setRepository(git.repository)
-            var diffs = diffFormatter.scan(parent, targetCommit)
-            for (diff in diffs) {
-                val fileHeader = diffFormatter.toFileHeader(diff)
-                val edits = fileHeader.toEditList()
-                editsAB.addAll(edits)
-            }
+        val diffFormatter = diffFormatterThreadLocal.get()
+        diffFormatter.setRepository(git.repository)
+        for (diff in diffFormatter.scan(parent, targetCommit)) {
+            val edits = diffFormatter.toFileHeader(diff).toEditList()
+            editsAB.addAll(edits)
+            abSize += edits.sumOf { it.lengthB.toLong() }
+        }
 
-            abSize = editsAB.stream().mapToLong { obj: Edit -> obj.lengthB.toLong().toLong() }.sum()
-            if (abSize == 0L) return 0.0
+        if (abSize == 0L) return 0.0
 
-            diffs = diffFormatter.scan(targetCommit, lastMonthCommit)
-            for (diff in diffs) {
-                val fileHeader = diffFormatter.toFileHeader(diff)
-                val edits = fileHeader.toEditList()
-                editsBC.addAll(edits)
+        var intersectionSize = 0.0
+        for (diff in diffFormatter.scan(targetCommit, lastMonthCommit)) {
+            val edits = diffFormatter.toFileHeader(diff).toEditList()
+            editsBC.addAll(edits)
+        }
+
+        val mergedB = mergeIntersectingRanges(editsBC)
+        for (editA in editsAB) {
+            for (rangeB in mergedB) {
+                val start = max(editA.beginB, rangeB[0])
+                val end = min(editA.endB, rangeB[1])
+                if (start < end) {
+                    intersectionSize += (end - start)
+                }
             }
         }
-        val intersectionSize =
-            getIntersectingEdits(editsAB, editsBC).stream().mapToDouble { it: IntArray -> (it[1] - it[0]).toDouble() }
-                .sum()
 
         return 1 - intersectionSize / abSize
     }
 
+    private fun calculateCommitStabilityStricter(git: Git, targetCommit: RevCommit, lastMonthCommit: RevCommit): Double {
+        val parent = if (targetCommit.parentCount > 0) targetCommit.getParent(0) else return 1.0
+        if (targetCommit.tree == null) return 1.0
+        var abSize = 0L
+        var intersectionSize = 0.0
 
-    private fun getIntersectionStartAndEnd(editA: Edit, editB: IntArray): IntArray {
-        val start = max(editA.beginB.toDouble(), editB[0].toDouble()).toInt()
-        val end = min(editA.endB.toDouble(), editB[1].toDouble()).toInt()
+        val diffFormatter = diffFormatterThreadLocal.get()
+        diffFormatter.setRepository(git.repository)
 
-        return if (start < end) {
-            intArrayOf(start, end)
+        // Get diffs for the original commit (parent → target)
+        val diffsAB = diffFormatter.scan(parent, targetCommit)
+
+        // Get diffs for the next month (target → nextMonth)
+        val diffsBC = diffFormatter.scan(targetCommit, lastMonthCommit)
+
+        for (diffAB in diffsAB) {
+            val pathA = diffAB.newPath
+            val matchingDiffBC = diffsBC.find { it.newPath == pathA || it.oldPath == pathA } ?: continue
+            val editsAB = diffFormatter.toFileHeader(diffAB).toEditList()
+            val editsBC = diffFormatter.toFileHeader(matchingDiffBC).toEditList()
+
+            if (editsAB.isEmpty() || editsBC.isEmpty()) continue
+            abSize += editsAB.sumOf { it.lengthB.toLong() }
+            intersectionSize += getIntersectingEdits(editsAB, editsBC)
+                .sumOf { (it[1] - it[0]).toDouble() }
+        }
+
+        return if (abSize == 0L) {
+            1.0 // fully stable, no overlapping edits
         } else {
-            IntArray(0)
+            val value = 1 - (intersectionSize / abSize)
+            if (value.isNaN() || value.isInfinite()) 1.0 else value
         }
     }
 
-    fun mergeIntersectingRanges(edits: List<Edit>): List<IntArray> {
+    private fun getIntersectingEdits(editsA: List<Edit>, editsB: List<Edit>): List<IntArray> {
+        val intersectingEdits = mutableListOf<IntArray>()
+        val mergedEditsB = mergeIntersectingRanges(editsB)
+
+        for (editA in editsA) {
+            for (editB in mergedEditsB) {
+                // Only compare within the target file’s coordinate space (B)
+                val start = max(editA.beginB, editB[0])
+                val end = min(editA.endB, editB[1])
+                if (start < end) intersectingEdits.add(intArrayOf(start, end))
+            }
+        }
+        return intersectingEdits
+    }
+
+    private fun mergeIntersectingRanges(edits: List<Edit>): List<IntArray> {
         if (edits.isEmpty()) return emptyList()
-        val sortedEdits = edits.sortedBy { it.beginA }
-        val mergedRanges: MutableList<IntArray> = ArrayList()
-        var currentRange = intArrayOf(edits[0].beginA, edits[0].endA)
+        val sorted = edits.sortedBy { it.beginB }
+        val mergedRanges = mutableListOf<IntArray>()
+        var currentRange = intArrayOf(sorted[0].beginB, sorted[0].endB)
 
-        for (edit in sortedEdits) {
-            val startA = edit.beginA
-            val endA = edit.endA
-
-            if (startA <= currentRange[1]) {
-                currentRange[1] = max(currentRange[1].toDouble(), endA.toDouble()).toInt()
+        for (edit in sorted.drop(1)) {
+            if (edit.beginB <= currentRange[1]) {
+                currentRange[1] = max(currentRange[1], edit.endB)
             } else {
                 mergedRanges.add(currentRange)
-                currentRange = intArrayOf(startA, endA)
+                currentRange = intArrayOf(edit.beginB, edit.endB)
             }
         }
         mergedRanges.add(currentRange)
         return mergedRanges
-    }
-
-    private fun getIntersectingEdits(editsA: List<Edit>, editsB: List<Edit>): List<IntArray> {
-        val intersectingEdits: MutableList<IntArray> = ArrayList()
-        val mergedEditsB = mergeIntersectingRanges(editsB)
-        for (editA in editsA) {
-            for (editB in mergedEditsB) {
-                val intersection = getIntersectionStartAndEnd(editA, editB)
-                if (intersection.size != 0) {
-                    intersectingEdits.add(intersection)
-                }
-            }
-        }
-        return intersectingEdits
     }
 }
