@@ -28,6 +28,16 @@ class GitOperations(var path:String) {
     val git: Git get() = runCatching { Git.open(File(path)) }
             .getOrElse { throw VCSException("Failed to open Git repository at $path. ${it.message}") }
 
+    fun fetchAll() = git.use { git ->
+        runCatching { git.fetch()
+            .setRemote("origin")
+            .setRefSpecs("+refs/*:refs/*") // fetch all refs (branches, tags)
+            .setRemoveDeletedRefs(true)
+            .setTagOpt(org.eclipse.jgit.transport.TagOpt.FETCH_TAGS)
+            .call() }
+            .getOrElse { throw RuntimeException("Error in fetchAll() for $path. ${it.message}", it) }
+    }
+
     fun getHeadCommit(): ChangeSet = git.use { git ->
         runCatching {
             val head = git.repository.resolve(Constants.HEAD)
@@ -44,9 +54,7 @@ class GitOperations(var path:String) {
         }.getOrElse { throw RuntimeException("Error in getHead() for $path", it) }
     }
 
-    fun getOrigin(): String = runCatching {
-        git.repository.config.getString("remote", "origin", "url")
-    }.getOrElse { throw RuntimeException("Couldn't get origin for repo: $path") }
+    fun getOrigin(): String = git.repository.config.getString("remote", "origin", "url") ?: ""
 
     private fun convertToDate(revCommit: RevCommit): GregorianCalendar = GregorianCalendar().apply {
         timeZone = TimeZone.getTimeZone(revCommit.authorIdent.zoneId)

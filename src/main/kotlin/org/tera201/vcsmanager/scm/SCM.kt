@@ -1,6 +1,8 @@
 package org.tera201.vcsmanager.scm
 
+import com.intellij.openapi.project.Project
 import org.eclipse.jgit.lib.Ref
+import org.tera201.vcsmanager.db.entities.CommitEntity
 import org.tera201.vcsmanager.db.entities.CommitSize
 import org.tera201.vcsmanager.domain.ChangeSet
 import org.tera201.vcsmanager.domain.Commit
@@ -37,12 +39,22 @@ interface SCM {
     /** Retrieves a commit by its [id], or `null` if not found. */
     fun getCommit(id: String): Commit?
 
+    fun getCommitsByMessageRegex(pattern: String): List<String>
+
+    fun getCommitBy(branch: String, authorEmail: String, filePath: String?, fileType: String?, messagePattern: String?, changesPattern: String?): List<String>
+
     /* TODO A method named getCommitXYZ should return a Commit. */
     /** Retrieves a commit associated with a specific [tag]. */
     fun getCommitFromTag(tag: String): String
 
+    fun getCommitDiffByFiles(hash: String): Map<String, Pair<String, String>>
+
     /** Retrieves all branches in the repository. */
     val allBranches: List<Ref>
+
+    val allBranchesMap: Map<String, Ref>
+
+    val allBranchesName: List<String>
 
     /** Retrieves all tags in the repository. */
     val allTags: List<Ref>
@@ -57,6 +69,9 @@ interface SCM {
 
     /** Resets the repository to the HEAD state. */
     fun reset()
+
+    /** Retrieves the commit history of the current branch. */
+    fun getCommitInfo(authorEmail: String, branch: String): List<CommitEntity>
 
     // ===================== Commit Differences =====================
 
@@ -96,4 +111,5 @@ interface SCM {
 
     /** Prepares the database. */
     fun dbPrepared()
+    fun dbPrepared(project: Project)
 }

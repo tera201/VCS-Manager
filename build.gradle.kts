@@ -1,5 +1,6 @@
 plugins {
-    kotlin("jvm") version "2.1.0"
+    alias(libs.plugins.platform)
+    alias(libs.plugins.kotlin)
 }
 
 java {
@@ -11,18 +12,26 @@ version = "1.0.0"
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
 dependencies {
-    implementation("commons-io:commons-io:2.14.0")
-    compileOnly("org.projectlombok:lombok:1.18.30")
-    annotationProcessor("org.projectlombok:lombok:1.18.30")
-    implementation("org.apache.commons:commons-lang3:3.3.2")
-    implementation("org.slf4j:slf4j-simple:1.7.36")
-    implementation("org.eclipse.jgit:org.eclipse.jgit:7.1.0.202411261347-r"){
+    implementation(libs.commons.io)
+    compileOnly(libs.lombok)
+    annotationProcessor(libs.lombok)
+    implementation(libs.commons.lang3)
+    implementation(libs.slf4j.simple)
+    implementation(libs.jgit) {
         exclude(group = "org.slf4j")
     }
-    implementation("org.xerial:sqlite-jdbc:3.45.3.0")
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.15.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
+    implementation(libs.sqlite)
+    implementation(libs.jackson.databind)
+    implementation(libs.coroutines.core)
+    implementation(libs.bundles.exposed)
+
+    intellijPlatform {
+        intellijIdeaCommunity("2025.1")
+    }
 }

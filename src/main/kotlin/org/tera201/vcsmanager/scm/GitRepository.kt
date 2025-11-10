@@ -1,5 +1,6 @@
 package org.tera201.vcsmanager.scm
 
+import com.intellij.openapi.project.Project
 import kotlinx.coroutines.runBlocking
 import org.apache.commons.io.FileUtils
 import org.eclipse.jgit.lib.*
@@ -21,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap
 /* TODO Name: Sounds like it inherits SCMRepository, but it actually implements SCM. */
 open class GitRepository
     (path: String = "", val repoName: String, protected var firstParentOnly: Boolean = false, vcsDataBase: VCSDataBase? = null) : SCM {
-    private var vcsDataBase: VCSDataBase
+    private var vcsDataBase: VCSDataBase = vcsDataBase ?:  VCSDataBase("$path/repository.db")
     //TODO should be singleton
     override var collectConfig: CollectConfiguration = CollectConfiguration().everything()
     var path: String = path
@@ -35,7 +36,7 @@ open class GitRepository
         get() = if (!firstParentOnly) gitOps.getAllCommits() else gitOps.firstParentsCommitOnly()
     private var gitOps: GitOperations = GitOperations(path)
     private var diffService: DiffService = DiffService(gitOps)
-    private var gitRepositoryUtil: GitRepositoryUtil
+    private var gitRepositoryUtil: GitRepositoryUtil = GitRepositoryUtil(gitOps, vcsDataBase!!, projectId, filePathMap, developersMap)
     private val allFilesInPath: List<File> get() = RDFileUtils.getAllFilesInPath(path)
     override val totalCommits: Long get() = changeSets.size.toLong()
     override val developerInfo get() = getDeveloperInfo(null)
@@ -43,8 +44,6 @@ open class GitRepository
 
     init {
         log.debug("Creating a GitRepository from path $path")
-        this.vcsDataBase = vcsDataBase ?:  VCSDataBase("$path/repository.db")
-        gitRepositoryUtil = GitRepositoryUtil(gitOps, vcsDataBase!!, projectId)
         val splitPath = path.replace("\\", "/").split("/".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
 //        repoName = if (splitPath.isNotEmpty()) splitPath.last() else ""
     }
@@ -52,7 +51,7 @@ open class GitRepository
     override val info: SCMRepository
         get() = runCatching {
             SCMRepository(this, gitOps.getOrigin(), repoName, path, gitOps.getHeadCommit().id, gitOps.getLastCommit().id)
-        }.getOrElse { throw RuntimeException("Couldn't create JGit instance with path $path") }
+        }.getOrElse { throw RuntimeException("Couldn't create JGit instance with path $path: ${it.message}") }
 
     override fun getRepositorySize(all: Boolean, branchOrTag: String?, filePath: String?): Map<String, CommitSize> =
         gitRepositoryUtil.repositorySize(path, filePath)
@@ -64,6 +63,12 @@ open class GitRepository
     override fun getCommit(id: String): Commit? = gitOps.getCommit(id)
 
     override val allBranches: List<Ref> get() = gitOps.getAllBranches()
+
+    override val allBranchesMap: Map<String, Ref>
+        get() = gitOps.getAllBranches().associateBy { it.name }
+
+    override val allBranchesName: List<String>
+        get() = gitOps.getAllBranches().map { it.name }
 
     override val allTags: List<Ref> get() = gitOps.getAllTags()
 
@@ -83,13 +88,34 @@ open class GitRepository
     @Synchronized
     override fun reset() = gitOps.reset()
 
+    override fun dbPrepared(project: Project) =
+        runBlocking { gitRepositoryUtil.dbPrepared(project) }
+
     override fun dbPrepared() =
-        runBlocking { gitRepositoryUtil.dbPrepared(filePathMap) }
+        runBlocking { gitRepositoryUtil.dbPrepared() }
 
     override fun getDeveloperInfo(nodePath: String?): Map<String, DeveloperInfo> =
-        runBlocking { gitRepositoryUtil.getDeveloperInfo(filePathMap, developersMap, path, nodePath, files()) }
+        runBlocking { runCatching { gitRepositoryUtil.getDeveloperInfo(path, nodePath, files()) }.onFailure { it.printStackTrace() }.getOrNull()!! }
+
+    override fun getCommitInfo(authorEmail: String, branch: String): List<CommitEntity> {
+        val branchId = vcsDataBase.getBranchId(projectId, branch)
+        if (branchId != null && branchId != -1) {
+            return if (vcsDataBase.getAuthorId(projectId, authorEmail) == null)
+                vcsDataBase.getBranchCommitMap(projectId, branchId).mapNotNull {vcsDataBase.getCommit(projectId, it)}
+            else
+                vcsDataBase.getBranchCommitMap(projectId, branchId).mapNotNull {vcsDataBase.getCommit(projectId, it, authorEmail)}
+        }
+        return vcsDataBase.getAllCommits(projectId)
+    }
+
+    override fun getCommitsByMessageRegex(pattern: String): List<String> = vcsDataBase.getCommitsByMessageRegex(projectId, pattern)
+
+    override fun getCommitBy(branch: String, authorEmail: String, filePath: String?, fileType: String?, messagePattern: String?, changesPattern: String?): List<String> {
+        TODO("Not yet implemented")
+    }
 
     override fun getCommitFromTag(tag: String): String = gitOps.getCommitByTag(tag)
+    override fun getCommitDiffByFiles(hash: String): Map<String, Pair<String, String>> = gitRepositoryUtil.getCommitChanges(hash)
 
     override fun clone(dest: Path): SCM {
         log.info("Cloning to $dest")
